@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { send, useData, type Person } from './client';
 import LiveModeration from './live-controls';
 
-export type Grant = { id: string; url: string; token: string; host: boolean; hostId: string; shareCode: string };
+export type Grant = { id: string; url: string; token: string; host: boolean; guest?: boolean; hostId: string; shareCode: string };
 export type ChatLine = { id: string; user_id: string; handle: string; body: string };
 type Match = {
   id: string; guest_id: string; guest_name: string;
@@ -16,12 +16,14 @@ type Match = {
   voted: 'host' | 'guest' | null;
 };
 type Snapshot = {
-  room: { id: string; chat_open: boolean; pinned_id: string | null; ended: boolean };
-  self: { role: 'host' | 'moderator' | 'viewer'; mutedUntil: string | null };
+  room: { id: string; chat_open: boolean; pinned_id: string | null; ended: boolean; guest_access: boolean };
+  self: { role: 'host' | 'moderator' | 'viewer' | 'guest'; mutedUntil: string | null };
   match?: Match; messages: ChatLine[]; now: number;
 };
 
-export default function Broadcast({ grant, user, leave }: { grant: Grant; user: Person; leave: () => void }) {
+export default function Broadcast({ grant, user, signIn, leave }: {
+  grant: Grant; user: Person | null; signIn: () => void; leave: () => void;
+}) {
   const hostVideo = useRef<HTMLDivElement>(null);
   const guestVideo = useRef<HTMLDivElement>(null);
   const audioBox = useRef<HTMLDivElement>(null);
@@ -44,13 +46,14 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
   const [clock, setClock] = useState(0);
   const [liveNotice, setLiveNotice] = useState('');
   const path = '/live/' + grant.id;
-  const snapshot = useData<Snapshot>(everConnected ? path + '/state' : null, revision);
+  const statePath = grant.guest ? '/live/handoff/' + grant.shareCode + '/state' : path + '/state';
+  const snapshot = useData<Snapshot>(everConnected ? statePath : null, revision);
   const state = snapshot?.data;
   const match = state?.match;
   const activeGuest = match && ['ready', 'running'].includes(match.status) ? match.guest_id : null;
   const split = !!activeGuest;
-  const readyMatch = match?.status === 'ready' && activeGuest === user.id ? match.id : null;
-  const isPublisher = grant.host || activeGuest === user.id;
+  const readyMatch = match?.status === 'ready' && activeGuest === user?.id ? match.id : null;
+  const isPublisher = grant.host || activeGuest === user?.id;
   const canModerate = state?.self.role === 'host' || state?.self.role === 'moderator';
   const chatAllowed = canModerate || (state?.room.chat_open && (!state.self.mutedUntil || new Date(state.self.mutedUntil).getTime() <= clock));
   const sync = () => setRevision(value => value + 1);
@@ -72,9 +75,9 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
 
   useEffect(() => {
     if (!connected) return;
-    const ticker = setInterval(() => setRevision(value => value + 1), 3500);
+    const ticker = setInterval(() => setRevision(value => value + 1), grant.guest ? 8000 : 3500);
     return () => clearInterval(ticker);
-  }, [connected]);
+  }, [connected, grant.guest]);
 
   useEffect(() => {
     if (!state) return;
@@ -124,6 +127,9 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
     room.on(RoomEvent.Reconnected, () => { setConnected(true); setStatus('Live'); refresh(); });
     room.on(RoomEvent.Disconnected, () => {
       if (!open) return;
+      host.replaceChildren();
+      guest.replaceChildren();
+      audio.replaceChildren();
       setConnected(false);
       setStatus('Disconnected');
       refresh();
@@ -164,7 +170,11 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
   }, [grant, path]);
 
   useEffect(() => {
-    if (!connected || !activeGuest || activeGuest !== user.id || !match?.id || prepared.current === match.id) return;
+    if (grant.guest && state?.room.guest_access === false) void connection.current?.disconnect();
+  }, [grant.guest, state?.room.guest_access]);
+
+  useEffect(() => {
+    if (!connected || !activeGuest || activeGuest !== user?.id || !match?.id || prepared.current === match.id) return;
     const room = connection.current;
     if (!room) return;
     const matchId = match.id;
@@ -189,7 +199,7 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
     }
     void prepare();
     return () => { valid = false; };
-  }, [activeGuest, connected, match?.id, path, readyMatch, user.id]);
+  }, [activeGuest, connected, match?.id, path, readyMatch, user?.id]);
 
   useEffect(() => {
     if (grant.host || isPublisher) return;
@@ -226,7 +236,7 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
   function exit() {
     void perform(async () => {
       if (grant.host) await send(path + '/end', 'POST');
-      else if (activeGuest === user.id && match?.status === 'running' && connected) {
+      else if (activeGuest === user?.id && match?.status === 'running' && connected) {
         await send(path + '/match', 'POST', { action: 'forfeit', matchId: match.id });
       }
       leave();
@@ -246,12 +256,12 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
   const seconds = match?.status === 'running'
     ? Math.max(0, Math.ceil((new Date((starting ? match.starts_at : match.ends_at)!).getTime() - clock) / 1000)) : 0;
   const countdown = starting ? 'Starts in ' + seconds : Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
-  const canVote = connected && !grant.host && match?.guest_id !== user.id && !match?.voted && !starting && seconds > 0;
+  const canVote = connected && !!user && !grant.host && match?.guest_id !== user.id && !match?.voted && !starting && seconds > 0;
   const pinned = state?.messages.find(message => message.id === state.room.pinned_id);
 
   return <div className="arena">
     <div className="live-status">
-      <span role="status">{state?.room.ended ? 'Broadcast ended.' : status}</span>
+      <span role="status">{state?.room.ended ? 'Broadcast ended.' : grant.guest && state?.room.guest_access === false ? 'Guest watching is off.' : status}</span>
       <div className="arena-buttons">
         {connected && grant.shareCode && <button className="secondary" onClick={() => setShowShare(value => !value)} aria-expanded={showShare}>
           <Share2 size={16} /> Share LIVE
@@ -306,12 +316,12 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
         <strong>{match.host_score} – {match.guest_score}</strong></div>
       {match.outcome !== 'time' && <small>Match ended early.</small>}
     </section>}
-    {match && ['invited','ready'].includes(match.status) && (match.status === 'ready' || grant.host || match.guest_id === user.id) &&
+    {match && ['invited','ready'].includes(match.status) && (match.status === 'ready' || grant.host || match.guest_id === user?.id) &&
       <div className="battle">
         <p>{match.status === 'ready' ? 'Waiting for the challenger to publish video…' :
-          match.guest_id === user.id ? 'The host invited you to a 1v1 LIVE battle.' : 'Seat reserved for ' + match.guest_name + '. Share the LIVE link or code so they can join.'}</p>
+          match.guest_id === user?.id ? 'The host invited you to a 1v1 LIVE battle.' : 'Seat reserved for ' + match.guest_name + '. Share the LIVE link or code so they can join.'}</p>
         <div className="arena-buttons">
-          {connected && match.guest_id === user.id && match.status === 'invited' && <>
+          {connected && match.guest_id === user?.id && match.status === 'invited' && <>
             <button className="primary" disabled={pending} onClick={() => void matchAction('accept')}>Accept challenge</button>
             <button className="secondary" disabled={pending} onClick={() => void matchAction('decline')}>Decline</button>
           </>}
@@ -333,14 +343,18 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
     <div className="list live-chat" ref={chatList} aria-live="polite">
       {state?.messages.filter(message => message.id !== pinned?.id).map(message =>
         <div key={message.id} className="live-message"><p><strong>@{message.handle}</strong> {message.body}</p>
-          {connected && message.user_id !== user.id && <button className="link" onClick={() => setReporting({ id: message.user_id, label: '@' + message.handle })}>Report</button>}
+          {connected && user && message.user_id !== user.id && <button className="link" onClick={() => setReporting({ id: message.user_id, label: '@' + message.handle })}>Report</button>}
         </div>)}
     </div>
-    {connected && chatAllowed ? <form className="inline" onSubmit={event => submit(event, '/chat', { body: new FormData(event.currentTarget).get('body') })}>
+    {connected && user && chatAllowed ? <form className="inline" onSubmit={event => submit(event, '/chat', { body: new FormData(event.currentTarget).get('body') })}>
       <input name="body" aria-label="Live chat message" placeholder="Chat with the room…" maxLength={300} required />
       <button className="primary" disabled={pending} aria-label="Send chat message"><Send size={17} /></button>
-    </form> : connected && state && <p className="hint">{state.room.chat_open ? 'Your chat is timed out.' : 'Chat is closed.'}</p>}
-    {connected && !grant.host && <button className="link" onClick={() => setReporting({ id: grant.hostId, label: 'host' })}>Report broadcast</button>}
+    </form> : connected && user && state && <p className="hint">{state.room.chat_open ? 'Your chat is timed out.' : 'Chat is closed.'}</p>}
+    {grant.guest && !state?.room.ended && <div className="arena-buttons">
+      {connected && <span className="hint">Watching as a guest</span>}
+      <button className="link" onClick={signIn}>Sign in to chat or vote</button>
+    </div>}
+    {connected && user && !grant.host && <button className="link" onClick={() => setReporting({ id: grant.hostId, label: 'host' })}>Report broadcast</button>}
     {reporting && <form className="inline" onSubmit={event => {
       event.preventDefault();
       const form = event.currentTarget;
@@ -351,8 +365,8 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
       <button className="primary" disabled={pending}>Submit report</button>
       <button type="button" className="secondary" onClick={() => setReporting(undefined)}>Cancel</button>
     </form>}
-    {showMod && canModerate && state && <LiveModeration path={path} user={user} hostId={grant.hostId} chatOpen={state.room.chat_open}
-      messages={state.messages} pinnedId={state.room.pinned_id} revision={revision} ended={state.room.ended} onChange={sync} />}
+    {showMod && canModerate && state && user && <LiveModeration path={path} user={user} hostId={grant.hostId} chatOpen={state.room.chat_open}
+      guestAccess={state.room.guest_access} messages={state.messages} pinnedId={state.room.pinned_id} revision={revision} ended={state.room.ended} onChange={sync} />}
     {liveNotice && <p role="status">{liveNotice}</p>}
     {(error || snapshot?.error) && <p className="error" role="alert">{error || snapshot?.error}</p>}
   </div>;

@@ -2,9 +2,10 @@ import { Body, ConflictException, Controller, ForbiddenException, Get, NotFoundE
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { setTimeout as delay } from 'node:timers/promises';
+import { randomUUID } from 'node:crypto';
 import { AccessToken, DataPacket_Kind, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { z } from 'zod';
-import { cleanText, db, handleSchema, parse, requireUser, uuid, type Person } from './infra';
+import { cleanText, cookie, db, handleSchema, identity, parse, requireUser, uuid, type Person } from './infra';
 import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle, type LiveRoom } from './live-store';
 
 const { LIVEKIT_URL: url, LIVEKIT_API_KEY: key, LIVEKIT_API_SECRET: secret } = process.env;
@@ -15,6 +16,16 @@ const service = url && internalUrl && key && secret
 export const roomName = (id: string) => 'mwitu-' + id;
 const encoder = new TextEncoder();
 const duration = 180;
+export const guestIdentityPrefix = 'guest:';
+
+async function handoffRoom(raw: string) {
+  const code = parse(z.string().trim().toUpperCase().regex(/^[0-9A-F]{12}$/, 'Enter the 12-character LIVE code.'), raw);
+  const { rows: [room] } = await db.query<LiveRoom & { handle: string; display_name: string }>(`
+    SELECT r.*,u.handle,u.display_name FROM live_rooms r JOIN users u ON u.id=r.host_id
+    WHERE r.share_code=$1 AND r.online_at IS NOT NULL`, [code]);
+  if (!room) throw new NotFoundException('This LIVE code is invalid or the broadcast has ended.');
+  return room;
+}
 
 export function liveService() {
   if (!service) throw new ServiceUnavailableException('Live broadcasts are unavailable.');
@@ -46,11 +57,11 @@ async function waitForCamera(id: string, userId: string) {
   throw new ConflictException('Start your camera first.');
 }
 
-async function grant(room: LiveRoom, user: Person) {
-  const host = room.host_id === user.id;
+async function grant(room: LiveRoom, user: Pick<Person, 'id' | 'display_name'>, guest = false) {
+  const host = !guest && room.host_id === user.id;
   const token = new AccessToken(key, secret, { identity: user.id, name: user.display_name, ttl: '30s' });
   token.addGrant({ roomJoin: true, room: roomName(room.id), ...publishPermission(host) });
-  return { url, token: await token.toJwt(), host, id: room.id, hostId: room.host_id, shareCode: room.share_code };
+  return { url, token: await token.toJwt(), host, guest, id: room.id, hostId: room.host_id, shareCode: room.share_code };
 }
 
 export async function finishRoom(id: string, outcome: string, moderator?: Person) {
@@ -113,7 +124,9 @@ export async function reconcileLive() {
           'SELECT user_id FROM live_members WHERE room_id=$1 AND banned', [room.id])).rows.map(row => row.user_id));
         // The same room lock serializes role changes with the permission reconciliation.
         await Promise.allSettled(participants.map(async person => {
-          if (banned.has(person.identity)) return service.removeParticipant(name, person.identity);
+          if (banned.has(person.identity) || (!fresh.guest_access && person.identity.startsWith(guestIdentityPrefix))) {
+            return service.removeParticipant(name, person.identity);
+          }
           const guest = match?.guest_id === person.identity && ['ready', 'running'].includes(match.status);
           if (person.identity !== fresh.host_id && person.permission?.canPublish && !guest) {
             await service.updateParticipant(name, person.identity, { permission: publishPermission(false) });
@@ -160,16 +173,47 @@ export class LiveController {
   @Throttle({ default: { ttl: 60000, limit: 30 } })
   async handoff(@Param('code') raw: string) {
     liveService();
-    const code = parse(z.string().trim().toUpperCase().regex(/^[0-9A-F]{12}$/, 'Enter the 12-character LIVE code.'), raw);
-    const { rows: [match] } = await db.query<{ id: string; host_id: string; handle: string; display_name: string }>(`
-      SELECT r.id,r.host_id,u.handle,u.display_name FROM live_rooms r JOIN users u ON u.id=r.host_id
-      WHERE r.share_code=$1 AND r.online_at IS NOT NULL AND r.ended_at IS NULL`, [code]);
-    if (!match) throw new NotFoundException('This LIVE code is invalid or the broadcast has ended.');
+    const match = await handoffRoom(raw);
+    if (match.ended_at) throw new NotFoundException('This LIVE code is invalid or the broadcast has ended.');
     const [room] = await liveService().listRooms([roomName(match.id)]);
     if (!room) throw new NotFoundException('This LIVE is no longer available.');
     const participants = await liveService().listParticipants(room.name);
     if (!participants.some(person => person.identity === match.host_id)) throw new NotFoundException('This LIVE is no longer available.');
-    return { id: match.id, handle: match.handle, display_name: match.display_name };
+    return { id: match.id, handle: match.handle, display_name: match.display_name, guestAccess: match.guest_access };
+  }
+
+  @Post('handoff/:code/watch')
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
+  async watch(@Req() req: Request, @Param('code') raw: string) {
+    liveService();
+    const room = await handoffRoom(raw);
+    await connectedUser(room.id, room.host_id);
+    const user = await identity(req.cookies[cookie]);
+    return lockedRoom(room.id, async (client, fresh) => {
+      requireOpen(fresh);
+      if (user) await member(client, fresh, user);
+      if (!fresh.guest_access) throw new ForbiddenException('The host has turned off guest watching.');
+      return grant(fresh, { id: guestIdentityPrefix + randomUUID(), display_name: 'Guest viewer' }, true);
+    });
+  }
+
+  @Get('handoff/:code/state')
+  async guestState(@Param('code') raw: string) {
+    const room = await handoffRoom(raw);
+    return lockedRoom(room.id, async (client, fresh) => {
+      const { rows: [match] } = await client.query(`
+        SELECT m.id,m.guest_id,m.status,m.starts_at,m.ends_at,m.host_score,m.guest_score,m.winner_id,m.outcome,
+          u.display_name AS guest_name
+        FROM live_matches m JOIN users u ON u.id=m.guest_id
+        WHERE m.room_id=$1 AND m.status IN ('running','finished')
+          AND m.id=(SELECT id FROM live_matches WHERE room_id=$1 ORDER BY updated_at DESC,id DESC LIMIT 1)`,
+        [fresh.id]);
+      return {
+        self: { role: 'guest', mutedUntil: null },
+        room: { id: fresh.id, ended: !!fresh.ended_at, guest_access: fresh.guest_access, chat_open: false, pinned_id: null },
+        match: fresh.guest_access ? match : undefined, messages: [], now: Date.now(),
+      };
+    });
   }
 
   @Post(':id/join')
@@ -227,7 +271,7 @@ export class LiveController {
         WHERE m.room_id=$1 AND m.deleted_at IS NULL ORDER BY (m.id=$2) DESC NULLS LAST,m.created_at DESC,m.id DESC LIMIT 60`,
         [room.id, room.pinned_id]);
       return {
-        self, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at, chat_open: room.chat_open, pinned_id: room.pinned_id },
+        self, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
         match, messages: messages.reverse(), now: Date.now(),
       };
     });

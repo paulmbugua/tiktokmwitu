@@ -3,11 +3,12 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { cleanText, parse, requireUser, uuid } from './infra';
-import { connectedUser, liveService, notifyRoom, roomName } from './live';
+import { connectedUser, guestIdentityPrefix, liveService, notifyRoom, roomName } from './live';
 import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle } from './live-store';
 
 const controls = z.discriminatedUnion('action', [
   z.object({ action: z.literal('chat'), open: z.boolean() }),
+  z.object({ action: z.literal('guests'), open: z.boolean() }),
   z.object({ action: z.literal('keywords'), words: z.array(cleanText(50)).max(30) }),
   z.object({ action: z.enum(['pin', 'delete']), messageId: z.uuid() }),
   z.object({ action: z.literal('unpin') }),
@@ -28,13 +29,15 @@ export class LiveModerationController {
     return lockedRoom(id, async (client, room) => {
       requireModerator((await member(client, room, user)).role);
       const identities = room.ended_at ? [] : (await liveService().listParticipants(roomName(id))).map(person => person.identity);
+      const guests = identities.filter(id => id.startsWith(guestIdentityPrefix)).length;
+      const accounts = identities.filter(id => !id.startsWith(guestIdentityPrefix));
       const { rows: people } = await client.query(`
         SELECT u.id,u.handle,u.display_name,COALESCE(m.moderator,false) AS moderator,
           m.muted_until,COALESCE(m.banned,false) AS banned,u.id=ANY($2::uuid[]) AS connected
         FROM users u LEFT JOIN live_members m ON m.user_id=u.id AND m.room_id=$1
         WHERE u.id=ANY($2::uuid[]) OR (m.user_id IS NOT NULL AND
           (m.moderator OR m.banned OR m.muted_until>now()))
-        ORDER BY connected DESC,u.handle LIMIT 100`, [id, identities]);
+        ORDER BY connected DESC,u.handle LIMIT 100`, [id, accounts]);
       const { rows: audit } = await client.query(`
         SELECT a.id,a.action,a.details,a.created_at,u.handle AS actor, t.handle AS target
         FROM live_audit a JOIN users u ON u.id=a.actor_id LEFT JOIN users t ON t.id=a.target_id
@@ -43,7 +46,7 @@ export class LiveModerationController {
         SELECT r.target_id,u.handle,r.reason,r.updated_at
         FROM live_reports r JOIN users u ON u.id=r.target_id
         WHERE r.room_id=$1 AND r.target_id<>$2 ORDER BY r.updated_at DESC LIMIT 50`, [id, room.host_id]);
-      return { people, audit, reports, keywords: room.keywords };
+      return { people, audit, reports, guests, keywords: room.keywords };
     });
   }
 
@@ -122,6 +125,9 @@ export class LiveModerationController {
 
       if (command.action === 'chat') {
         await client.query('UPDATE live_rooms SET chat_open=$2 WHERE id=$1', [id, command.open]);
+      } else if (command.action === 'guests') {
+        if (role !== 'host') throw new ForbiddenException('Only the host can manage guest watching.');
+        await client.query('UPDATE live_rooms SET guest_access=$2 WHERE id=$1', [id, command.open]);
       } else if (command.action === 'keywords') {
         const words = [...new Set(command.words.map(word => word.normalize('NFKC').toLowerCase()))];
         await client.query('UPDATE live_rooms SET keywords=$2 WHERE id=$1', [id, words]);

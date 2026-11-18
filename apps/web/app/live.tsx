@@ -7,7 +7,7 @@ import { send, useData, type Person } from './client';
 import Broadcast, { type Grant } from './live-broadcast';
 
 type Listing = { enabled: boolean; rooms: Array<Person & { viewers: number; host_id: string }> };
-type RoomPreview = Pick<Person, 'id' | 'handle' | 'display_name'>;
+type RoomPreview = Pick<Person, 'id' | 'handle' | 'display_name'> & { guestAccess: boolean };
 const normalize = (value: string) => value.trim().replace(/[\s-]+/g, '').toUpperCase();
 const validCode = /^[0-9A-F]{12}$/;
 
@@ -39,6 +39,14 @@ export default function Live({ user, initialCode, resume, signIn }: {
     finally { setPending(false); }
   }, [signIn, user]);
 
+  async function guestWatch() {
+    setPending(true);
+    setError('');
+    try { setGrant(await send<Grant>('/live/handoff/' + code + '/watch', 'POST')); }
+    catch (error) { setError((error as Error).message); }
+    finally { setPending(false); }
+  }
+
   useEffect(() => {
     if (!resume || resumed.current || !user || !sharedRoom || !code) return;
     resumed.current = true;
@@ -56,7 +64,8 @@ export default function Live({ user, initialCode, resume, signIn }: {
     window.history.replaceState(null, '', url);
   }
 
-  if (grant && user) return <Broadcast key={grant.id} grant={grant} user={user} leave={browse} />;
+  if (grant && (user || grant.guest)) return <Broadcast key={grant.id} grant={grant} user={grant.guest ? null : user}
+    signIn={() => signIn(grant.shareCode)} leave={browse} />;
   if (code) return <section className="live-handoff" aria-label="LIVE invitation">
     <h3>{sharedRoom ? sharedRoom.display_name + ' is live' : 'Join a LIVE'}</h3>
     {sharedRoom && <p className="hint">@{sharedRoom.handle} · Code {code}</p>}
@@ -65,7 +74,10 @@ export default function Live({ user, initialCode, resume, signIn }: {
     {preview?.error && <p className="error" role="alert">{preview.error}</p>}
     {error && <p className="error" role="alert">{error}</p>}
     <div className="arena-buttons">
-      {sharedRoom && <button className="primary" disabled={pending} onClick={() => void join(sharedRoom.id, code)}>
+      {sharedRoom?.guestAccess && !user && <button className="primary" disabled={pending} onClick={() => void guestWatch()}>
+        <Radio size={17} /> {pending ? 'Joining…' : 'Watch as guest'}
+      </button>}
+      {sharedRoom && <button className={!user && sharedRoom.guestAccess ? 'secondary' : 'primary'} disabled={pending} onClick={() => void join(sharedRoom.id, code)}>
         <Radio size={17} /> {pending ? 'Joining…' : !user ? 'Sign in to join LIVE' : user.handle === sharedRoom.handle ? 'Rejoin as host' : 'Join LIVE'}
       </button>}
       <button className="secondary" disabled={pending} onClick={browse}>Browse LIVE</button>

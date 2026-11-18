@@ -19,6 +19,7 @@ UPDATE live_rooms SET share_code=upper(left(replace(id::text,'-',''),12)) WHERE 
 ALTER TABLE live_rooms ALTER COLUMN share_code SET DEFAULT upper(left(replace(gen_random_uuid()::text,'-',''),12));
 ALTER TABLE live_rooms ALTER COLUMN share_code SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS live_room_share_code ON live_rooms(share_code);
+ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS guest_access boolean NOT NULL DEFAULT true;
 CREATE TABLE IF NOT EXISTS live_matches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   room_id uuid NOT NULL REFERENCES live_rooms ON DELETE CASCADE,
@@ -82,7 +83,7 @@ CREATE TABLE IF NOT EXISTS live_reports (
 
 export type LiveRoom = {
   id: string; host_id: string; online_at: Date | null; ended_at: Date | null; created_at: Date;
-  chat_open: boolean; keywords: string[]; pinned_id: string | null; share_code: string;
+  chat_open: boolean; keywords: string[]; pinned_id: string | null; share_code: string; guest_access: boolean;
 };
 export type Match = {
   id: string; room_id: string; guest_id: string; status: 'invited' | 'ready' | 'running' | 'finished' | 'cancelled';

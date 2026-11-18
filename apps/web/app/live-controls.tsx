@@ -7,11 +7,11 @@ import type { ChatLine } from './live-broadcast';
 type Member = Person & { moderator: boolean; muted_until: string | null; banned: boolean; connected: boolean };
 type Report = { target_id: string; handle: string; reason: string; updated_at: string };
 type Audit = { id: string; action: string; actor: string; target: string | null; created_at: string };
-type ModerationData = { people: Member[]; keywords: string[]; audit: Audit[]; reports: Report[] };
+type ModerationData = { people: Member[]; keywords: string[]; audit: Audit[]; reports: Report[]; guests: number };
 
-export default function LiveModeration({ path, user, hostId, chatOpen, messages, pinnedId, revision, ended, onChange }: {
+export default function LiveModeration({ path, user, hostId, chatOpen, guestAccess, messages, pinnedId, revision, ended, onChange }: {
   path: string; user: Person; hostId: string; chatOpen: boolean; messages: ChatLine[];
-  pinnedId: string | null; revision: number; ended: boolean; onChange: () => void;
+  guestAccess: boolean; pinnedId: string | null; revision: number; ended: boolean; onChange: () => void;
 }) {
   const result = useData<ModerationData>(path + '/moderation', revision);
   const data = result?.data;
@@ -39,6 +39,12 @@ export default function LiveModeration({ path, user, hostId, chatOpen, messages,
         {chatOpen ? 'Close chat' : 'Open chat'}
       </button>
     </header>
+    {host && <div className="arena-buttons">
+      <button className="secondary" disabled={disabled} onClick={() => void act('guests', { open: !guestAccess })}>
+        {guestAccess ? 'Turn off guest watching' : 'Allow guest watching'}
+      </button>
+      {data && <small>{data.guests} watching as guests</small>}
+    </div>}
     {!result && <p role="status">Loading moderation…</p>}
     {data && <>
       <form className="inline" onSubmit={event => {
