@@ -8,7 +8,10 @@ import { cleanText, db, handleSchema, parse, requireUser, uuid, type Person } fr
 import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle, type LiveRoom } from './live-store';
 
 const { LIVEKIT_URL: url, LIVEKIT_API_KEY: key, LIVEKIT_API_SECRET: secret } = process.env;
-const service = url && key && secret ? new RoomServiceClient(url, key, secret, { requestTimeout: 6 }) : null;
+const internalUrl = process.env.LIVEKIT_INTERNAL_URL || url;
+const service = url && internalUrl && key && secret
+  ? new RoomServiceClient(internalUrl, key, secret, { requestTimeout: 6 })
+  : null;
 export const roomName = (id: string) => 'mwitu-' + id;
 const encoder = new TextEncoder();
 const duration = 180;

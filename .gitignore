@@ -9,3 +9,4 @@ media/
 next-env.d.ts
 out/
 .wrangler/
+/secrets/

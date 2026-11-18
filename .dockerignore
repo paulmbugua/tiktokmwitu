@@ -7,4 +7,5 @@
 **/.wrangler
 **/media
 .env*
+secrets/
 *.log

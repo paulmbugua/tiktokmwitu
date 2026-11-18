@@ -1,0 +1,18 @@
+services:
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    command: ["--config", "/run/livekit/config.yaml"]
+    restart: unless-stopped
+    ports:
+      - "${LIVEKIT_BIND_IP:?Set the VPS public IPv4 address}:7881:7881/tcp"
+      - "${LIVEKIT_BIND_IP:?Set the VPS public IPv4 address}:7882:7882/udp"
+    volumes:
+      - ./secrets/livekit.yaml:/run/livekit/config.yaml:ro
+    networks:
+      default:
+        gw_priority: 1
+        aliases:
+          - tiktokmwitu-livekit
+      rivera_tunnel:
+        aliases:
+          - tiktokmwitu-livekit
