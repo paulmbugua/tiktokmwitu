@@ -1,0 +1,16 @@
+{$MWITU_DOMAIN} {
+	encode zstd gzip
+	handle /api/* {
+		request_body {
+			max_size 50MB
+		}
+		reverse_proxy api:4000
+	}
+	@realtime path /media/* /socket.io/*
+	handle @realtime {
+		reverse_proxy api:4000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

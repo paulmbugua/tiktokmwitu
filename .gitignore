@@ -1,0 +1,9 @@
+node_modules/
+.next/
+dist/
+*.tsbuildinfo
+.env*
+!.env.example
+media/
+*.log
+next-env.d.ts

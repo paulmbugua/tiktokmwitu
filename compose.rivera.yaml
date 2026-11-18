@@ -1,0 +1,21 @@
+
+services:
+  api:
+    networks:
+      default:
+      shared_edge:
+        aliases:
+          - tiktokmwitu-api
+  web:
+    networks:
+      default:
+      shared_edge:
+        aliases:
+          - tiktokmwitu-web
+  edge:
+    profiles: ["local-edge"]
+
+networks:
+  shared_edge:
+    external: true
+    name: ${RIVERA_EDGE_NETWORK:-rivera_default}

@@ -1,0 +1,17 @@
+# Add this block to the running Rivera Caddy's configuration and replace the hostname.
+mwitu.example.com {
+	encode zstd gzip
+	handle /api/* {
+		request_body {
+			max_size 50MB
+		}
+		reverse_proxy tiktokmwitu-api:4000
+	}
+	@mwitu_realtime path /media/* /socket.io/*
+	handle @mwitu_realtime {
+		reverse_proxy tiktokmwitu-api:4000
+	}
+	handle {
+		reverse_proxy tiktokmwitu-web:3000
+	}
+}

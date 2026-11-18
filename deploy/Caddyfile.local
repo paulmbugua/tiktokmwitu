@@ -1,0 +1,15 @@
+{$MWITU_LOCAL_ADDRESS::80} {
+	handle /api/* {
+		request_body {
+			max_size 50MB
+		}
+		reverse_proxy {$MWITU_API_UPSTREAM:api:4000}
+	}
+	@realtime path /media/* /socket.io/*
+	handle @realtime {
+		reverse_proxy {$MWITU_API_UPSTREAM:api:4000}
+	}
+	handle {
+		reverse_proxy {$MWITU_WEB_UPSTREAM:web:3000}
+	}
+}
