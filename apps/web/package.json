@@ -6,6 +6,7 @@
     "build": "next build",
     "build:cloudflare": "node cloudflare/build.mjs",
     "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",
+    "deploy:www": "wrangler deploy --config wrangler.www.jsonc",
     "start": "next start"
   },
   "dependencies": {

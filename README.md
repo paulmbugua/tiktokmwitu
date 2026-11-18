@@ -20,6 +20,7 @@ The empty feed fills when users publish. Use two accounts in separate browser pr
 ## Production hostnames
 
 - `https://tiktokmwitu.co.ke` serves the short-video app on Cloudflare Workers Static Assets.
+- `https://www.tiktokmwitu.co.ke` redirects to `https://tiktokmwitu.co.ke` and preserves paths and query strings.
 - `https://admin.tiktokmwitu.co.ke` serves the moderation interface from the same Worker. NestJS verifies moderator permissions before returning reports or accepting actions.
 - `https://api.tiktokmwitu.co.ke` reaches NestJS, uploaded media, and Socket.IO on Rivera’s VPS over Cloudflare Tunnel.
 
@@ -29,7 +30,9 @@ The empty feed fills when users publish. Use two accounts in separate browser pr
 2. Publish `api.tiktokmwitu.co.ke` through the existing Rivera Production tunnel. Cloudflare creates a proxied CNAME for the route. Replace any conflicting legacy `api` record only after verifying it belongs to this app.
 3. With an authenticated Wrangler session for the account that owns the zone, run `npm ci` followed by `npm run deploy:cloudflare -w web`. Wrangler builds the static Next.js app and attaches the apex and admin hostnames as Worker Custom Domains. Resolve any existing DNS record conflicts for those two hostnames before first attaching them.
 
-The app makes credentialed HTTPS requests directly to the API and opens Socket.IO there over WSS. The API accepts the two web origins and stores sessions in an API-host-only cookie. Keep all three public hostnames on HTTPS.
+The app makes credentialed HTTPS requests directly to the API and opens Socket.IO there over WSS. The API accepts the two web origins and stores sessions in an API-host-only cookie. Use HTTPS for all public hostnames.
+
+Run `npm run deploy:www -w web` to deploy the separate Cloudflare Worker for the `www` redirect.
 
 ### Deploy the API on Rivera’s VPS
 

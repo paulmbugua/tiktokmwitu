@@ -1,0 +1,11 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "tiktokmwitu-www",
+  "main": "cloudflare/www.mjs",
+  "compatibility_date": "2026-11-18",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "www.tiktokmwitu.co.ke", "custom_domain": true }
+  ]
+}
