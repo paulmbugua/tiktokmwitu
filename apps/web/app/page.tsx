@@ -9,6 +9,7 @@ import {
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { io } from 'socket.io-client';
 import dynamic from 'next/dynamic';
+import SignupNameFields from './signup-name-fields';
 import { api, mediaUrl, send, useData, type Comment, type Feed, type Inbox, type Message, type Person, type Profile, type Video } from './client';
 
 type Tab = 'For You' | 'Following' | 'Discover';
@@ -400,8 +401,8 @@ export default function Home() {
         signIn={liveCode => open({ kind: 'auth', liveCode })} />}
       {panel.kind === 'auth' && <form onSubmit={submit}>
         {panel.liveCode && <p className="hint">After signing in, you’ll return to the LIVE.</p>}
-        {mode === 'register' && <label>Display name<input name="display_name" autoComplete="nickname" maxLength={48} required /></label>}
-        <label>Handle<input name="handle" autoComplete="username" pattern="[A-Za-z0-9_]{3,24}" maxLength={24} required /></label>
+        {mode === 'register' ? <SignupNameFields /> : <label>Handle<input name="handle" autoComplete="username"
+          pattern="[A-Za-z0-9_]{3,24}" maxLength={24} required /></label>}
         <label>Password<input name="password" type="password" minLength={10} maxLength={128} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required /></label>
         <button className="primary" disabled={pending}>{mode === 'register' ? 'Create account' : 'Log in'}</button>
         <button type="button" className="link" disabled={pending} onClick={() => { setDialogError(''); setMode(mode === 'register' ? 'login' : 'register'); }}>

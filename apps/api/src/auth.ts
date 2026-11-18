@@ -1,6 +1,7 @@
 
 import { Body, ConflictException, Controller, Get, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { randomBytes } from 'node:crypto';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import {
@@ -28,6 +29,21 @@ async function loginSession(req: Request, res: Response, user: Person) {
 export class AuthController {
   @Get('me')
   async me(@Req() req: Request) { return { user: await identity(req.cookies[cookie]) }; }
+
+  @Post('suggest-handle')
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  async suggestHandle(@Body() body: unknown) {
+    const { display_name } = parse(registration.pick({ display_name: true }), body);
+    const normalized = display_name.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    const stem = normalized || 'mwitu_user';
+    const base = stem.length >= 3 ? stem.slice(0, 24) : stem + '_ke';
+    const candidates = [base, ...Array.from({ length: 5 }, () =>
+      base.slice(0, 17) + '_' + randomBytes(3).toString('hex'))];
+    const { rows } = await db.query<{ handle: string }>('SELECT handle FROM users WHERE handle=ANY($1::text[])', [candidates]);
+    const used = new Set(rows.map(row => row.handle));
+    return { handle: candidates.find(candidate => !used.has(candidate)) ?? null };
+  }
 
   @Post('register')
   @Throttle({ default: { limit: 8, ttl: 60000 } })
