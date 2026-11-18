@@ -12,6 +12,7 @@ import {
   searchSchema, uploadLimit, uuid, SessionGuard,
 } from './infra';
 import { removeVideo, saveVideo } from './media';
+import type { MediaStorage } from './media-storage';
 
 const videoFields = z.object({ caption: cleanText(500), county: cleanText(40) });
 const textBody = z.object({ body: cleanText(500) });
@@ -77,11 +78,12 @@ export class VideosController {
     const user = await requireUser(req);
     const { caption, county } = parse(videoFields, body);
     if (!file?.buffer.length) throw new BadRequestException('Choose a video.');
-    const mediaId = await saveVideo(file.buffer);
+    const { id: mediaId, storage } = await saveVideo(file.buffer);
     try {
-      await db.query('INSERT INTO videos(id,user_id,caption,county) VALUES ($1,$2,$3,$4)', [mediaId, user.id, caption, county]);
+      await db.query('INSERT INTO videos(id,user_id,caption,county,media_storage) VALUES ($1,$2,$3,$4,$5)',
+        [mediaId, user.id, caption, county, storage]);
     } catch (error) {
-      await removeVideo(mediaId).catch(() => undefined);
+      await removeVideo(mediaId, storage).catch(() => undefined);
       throw error;
     }
     publishFeed();
@@ -92,9 +94,13 @@ export class VideosController {
   async delete(@Req() req: Request, @Param('id') raw: string) {
     const user = await requireUser(req);
     const id = uuid(raw);
-    const result = await db.query('DELETE FROM videos WHERE id=$1 AND user_id=$2', [id, user.id]);
-    if (!result.rowCount) throw new NotFoundException('Video unavailable.');
-    await removeVideo(id);
+    const { rows: [video] } = await db.query<{ media_storage: MediaStorage }>(`
+      WITH removed AS (DELETE FROM videos WHERE id=$1 AND user_id=$2 RETURNING id,media_storage),
+        queued AS (INSERT INTO video_media_cleanup(id) SELECT id FROM removed WHERE media_storage='r2'
+          ON CONFLICT DO NOTHING)
+      SELECT media_storage FROM removed`, [id, user.id]);
+    if (!video) throw new NotFoundException('Video unavailable.');
+    await removeVideo(id, video.media_storage).catch(error => console.error('Removed media file needs cleanup', id, error));
     publishFeed();
     return { ok: true };
   }

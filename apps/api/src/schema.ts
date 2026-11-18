@@ -21,6 +21,12 @@ CREATE TABLE IF NOT EXISTS videos (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS videos_feed ON videos(created_at DESC, id DESC);
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS media_storage text NOT NULL DEFAULT 'local'
+  CHECK (media_storage IN ('local','r2'));
+CREATE TABLE IF NOT EXISTS video_media_cleanup (
+  id uuid PRIMARY KEY,
+  queued_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE INDEX IF NOT EXISTS videos_creator ON videos(user_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS follows (
   follower_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,

@@ -33,6 +33,8 @@ services:
       LIVEKIT_INTERNAL_URL: ${LIVEKIT_INTERNAL_URL:-}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      R2_MEDIA_ORIGIN: ${R2_MEDIA_ORIGIN:-}
+      MEDIA_STORAGE_SECRET: ${MEDIA_STORAGE_SECRET:-}
     volumes:
       - media:/media
     depends_on:

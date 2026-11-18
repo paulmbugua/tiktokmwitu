@@ -3,7 +3,7 @@
 
 Tiktok mwitu is a Kenya-focused short-video app. Next.js serves the mobile and desktop interface, NestJS serves the API and Socket.IO, and PostgreSQL stores accounts, sessions, videos, follows, likes, comments, messages and reports. FFmpeg creates browser-playable MP4s with a capped bitrate. Authenticated users can host and watch LiveKit broadcasts with room chat when a LiveKit endpoint is configured.
 
-The For You feed is chronological. Discover searches captions, creator names, handles and counties. Following uses each account’s actual follow graph. New video activity and private inbox changes arrive over WebSocket. Video bytes are persisted in a Docker volume.
+The For You feed is chronological. Discover searches captions, creator names, handles and counties. Following uses each account’s actual follow graph. New video activity and private inbox changes arrive over WebSocket. Production clips are stored in Cloudflare R2. Local clips use the development media directory or Docker volume.
 
 ## Run on your machine
 
@@ -58,8 +58,11 @@ docker compose exec db psql -U mwitu -d mwitu -c "SELECT id,handle FROM users WH
 
 Add the verified ID to `ADMIN_USER_IDS` in the VPS `.env`. Separate multiple IDs with commas and rerun the tunnel Compose command to apply the change. That account can log in at `https://admin.tiktokmwitu.co.ke`, inspect reported videos, dismiss reports, or remove a video. Decisions are recorded in `moderation_actions`. Leaving the allowlist empty disables moderator access. For native development, visit `http://localhost:3000/admin` with a local account ID allowlisted.
 
-Back up PostgreSQL and the media volume together. Keep one API replica with this configuration because the upload encoder and socket rooms are process-local.
-The tunnel deployment reserves 1 GiB of free VPS space when accepting new video uploads. Set `MWITU_PRIVATE_SUBNET` to an unused subnet if the app's private bridge conflicts with another network.
+Back up PostgreSQL and the media it references. Keep one API replica with this configuration because the upload encoder and socket rooms are process-local. Set `MWITU_PRIVATE_SUBNET` to an unused subnet if the app's private bridge conflicts with another network.
+
+### Production clip storage
+
+The web Worker binds to the private R2 bucket `tiktokmwitu-images`. Set `MEDIA_STORAGE_SECRET` to the same generated secret in the Worker and the VPS API, and set `R2_MEDIA_ORIGIN=https://tiktokmwitu.co.ke` on the VPS. Set the Worker secret with `npm exec -w web -- wrangler secret put MEDIA_STORAGE_SECRET`. The API transcodes in the tunnel deployment's bounded temporary filesystem and stores the result under `videos/` in R2. The existing API media URL checks whether the video still exists before issuing an expiring playback redirect. The Worker supports byte ranges for seeking. Video removal queues object cleanup if R2 is temporarily unavailable. Clips originally stored locally continue using their local files until migrated.
 
 ## Enable live broadcasts
 

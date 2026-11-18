@@ -1,5 +1,7 @@
 services:
   api:
+    tmpfs:
+      - /tmp/mwitu-media:size=160m,mode=1777
     networks:
       default:
       rivera_tunnel:
@@ -9,6 +11,7 @@ services:
       TRUST_PROXY_HOPS: 0
       TRUST_CLOUDFLARE_TUNNEL: "true"
       MEDIA_FREE_RESERVE_BYTES: ${MEDIA_FREE_RESERVE_BYTES:-1073741824}
+      MEDIA_WORK_DIR: /tmp/mwitu-media
   web:
     profiles: ["local-edge"]
   edge:

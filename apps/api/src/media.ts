@@ -6,26 +6,30 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { mediaDir } from './infra';
+import { cleanCloudVideo, putCloudVideo, useR2, type MediaStorage } from './media-storage';
 
 const ffmpeg = promisify(execFile);
 const diskReserve = Number(process.env.MEDIA_FREE_RESERVE_BYTES ?? 0);
 let encoding = false;
+const workDir = process.env.MEDIA_WORK_DIR ?? mediaDir;
 
 export async function saveVideo(upload: Buffer) {
   if (encoding) throw new ServiceUnavailableException('Another video is processing. Try again shortly.');
   encoding = true;
   const id = randomUUID();
-  const incoming = join(mediaDir, 'incoming', id);
-  const output = join(mediaDir, 'public', id + '.mp4');
+  const incoming = join(workDir, 'incoming', id);
+  const outputDir = useR2 ? join(workDir, 'processed') : join(mediaDir, 'public');
+  const output = join(outputDir, id + '.mp4');
   try {
-    if (diskReserve > 0) {
+    await mkdir(workDir, { recursive: true });
+    if (diskReserve > 0 && !useR2) {
       const disk = await statfs(mediaDir);
       if (disk.bavail * disk.bsize < diskReserve + upload.length + 32 * 1024 * 1024) {
         throw new ServiceUnavailableException('Video storage is temporarily full.');
       }
     }
-    await mkdir(join(mediaDir, 'incoming'), { recursive: true });
-    await mkdir(join(mediaDir, 'public'), { recursive: true });
+    await mkdir(join(workDir, 'incoming'), { recursive: true });
+    await mkdir(outputDir, { recursive: true });
     await writeFile(incoming, upload, { flag: 'wx' });
     // Explicit container and protocol allowlists keep uploaded inputs self-contained.
     await ffmpeg(process.env.FFMPEG_PATH ?? 'ffmpeg', [
@@ -40,7 +44,8 @@ export async function saveVideo(upload: Buffer) {
       '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', output,
     ], { timeout: 90000, windowsHide: true });
     if ((await stat(output)).size < 1024) throw new Error('No video frames');
-    return id;
+    if (useR2) await putCloudVideo(id, output);
+    return { id, storage: useR2 ? 'r2' as const : 'local' as const };
   } catch (error) {
     await rm(output, { force: true }).catch(() => undefined);
     if (error instanceof ServiceUnavailableException) throw error;
@@ -49,11 +54,13 @@ export async function saveVideo(upload: Buffer) {
     }
     throw new BadRequestException('Could not process the file. Try an MP4, MOV or WebM video.');
   } finally {
-    encoding = false;
     await rm(incoming, { force: true }).catch(() => undefined);
+    if (useR2) await rm(output, { force: true }).catch(() => undefined);
+    encoding = false;
   }
 }
 
-export function removeVideo(id: string) {
+export function removeVideo(id: string, storage: MediaStorage) {
+  if (storage === 'r2') return cleanCloudVideo(id);
   return rm(join(mediaDir, 'public', id + '.mp4'), { force: true });
 }

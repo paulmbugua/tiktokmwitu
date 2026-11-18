@@ -18,6 +18,7 @@ import { schema } from './schema';
 import { SocialController } from './social';
 import { LiveController, reconcileLive } from './live';
 import { LiveModerationController } from './live-moderation';
+import { playbackUrl, sweepCloudMedia, useR2 } from './media-storage';
 import { liveSchema } from './live-store';
 import { VideosController } from './videos';
 
@@ -77,8 +78,13 @@ async function start() {
     const match = /^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.mp4$/.exec(req.path);
     if (!match || !['GET', 'HEAD'].includes(req.method)) { res.sendStatus(404); return; }
     try {
-      const video = await db.query('SELECT 1 FROM videos WHERE id=$1', [match[1]]);
+      const video = await db.query<{ media_storage: string }>('SELECT media_storage FROM videos WHERE id=$1', [match[1]]);
       if (!video.rowCount) { res.sendStatus(404); return; }
+      if (video.rows[0].media_storage === 'r2') {
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.redirect(307, playbackUrl(match[1]));
+        return;
+      }
       next();
     } catch (error) { next(error); }
   });
@@ -124,6 +130,10 @@ async function start() {
   expiry.unref();
   const liveSweep = setInterval(() => void reconcileLive(), 4000);
   liveSweep.unref();
+  if (useR2) {
+    const mediaSweep = setInterval(() => void sweepCloudMedia().catch(error => console.error('Media cleanup failed', error)), 60000);
+    mediaSweep.unref();
+  }
   await app.listen(Number(process.env.API_PORT ?? 4000), process.env.API_HOST ?? '127.0.0.1');
 }
 

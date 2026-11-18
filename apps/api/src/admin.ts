@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { adminOrigin, db, parse, publishFeed, requireUser, uuid } from './infra';
 import { removeVideo } from './media';
+import type { MediaStorage } from './media-storage';
 import { finishRoom } from './live';
 import { lockedRoom } from './live-store';
 
@@ -84,13 +85,18 @@ export class AdminController {
     const id = uuid(raw);
     const { action } = parse(z.object({ action: z.enum(['dismiss', 'remove']) }), body);
     const client = await db.connect();
+    let storage: MediaStorage = 'local';
     try {
       await client.query('BEGIN');
-      const video = await client.query('SELECT id FROM videos WHERE id=$1 FOR UPDATE', [id]);
+      const video = await client.query<{ media_storage: MediaStorage }>('SELECT media_storage FROM videos WHERE id=$1 FOR UPDATE', [id]);
       if (!video.rowCount) throw new NotFoundException('Video unavailable.');
+      storage = video.rows[0].media_storage;
       const reports = await client.query('DELETE FROM reports WHERE video_id=$1', [id]);
       if (!reports.rowCount) throw new NotFoundException('This video has no pending reports.');
-      if (action === 'remove') await client.query('DELETE FROM videos WHERE id=$1', [id]);
+      if (action === 'remove') {
+        await client.query('DELETE FROM videos WHERE id=$1', [id]);
+        if (storage === 'r2') await client.query('INSERT INTO video_media_cleanup(id) VALUES ($1) ON CONFLICT DO NOTHING', [id]);
+      }
       await client.query(
         'INSERT INTO moderation_actions(actor_id,video_id,action,report_count) VALUES ($1,$2,$3,$4)',
         [user.id, id, action, reports.rowCount]);
@@ -103,7 +109,7 @@ export class AdminController {
     }
     if (action === 'remove') {
       publishFeed();
-      await removeVideo(id).catch(error => console.error('Removed media file needs cleanup', id, error));
+      await removeVideo(id, storage).catch(error => console.error('Removed media file needs cleanup', id, error));
     }
     return { ok: true };
   }
