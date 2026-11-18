@@ -1,10 +1,13 @@
 'use client';
 
-import { Camera, CameraOff, Heart, Mic, MicOff, Send, Share2, Shield, Swords } from 'lucide-react';
-import { Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
+import { Camera, CameraOff, Flag, Heart, Maximize, MessageCircle, Mic, MicOff, Minimize, Send, Share2, Shield, Sparkles, Swords, X } from 'lucide-react';
+import { LocalVideoTrack, Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { send, useData, type Person } from './client';
 import LiveModeration from './live-controls';
+import { CameraEffects, cameraLooks, type CameraLook } from './live-effects';
+
+const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects' };
 
 export type Grant = { id: string; url: string; token: string; host: boolean; guest?: boolean; hostId: string; shareCode: string };
 export type ChatLine = { id: string; user_id: string; handle: string; body: string };
@@ -28,6 +31,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const guestVideo = useRef<HTMLDivElement>(null);
   const audioBox = useRef<HTMLDivElement>(null);
   const chatList = useRef<HTMLDivElement>(null);
+  const followChat = useRef(true);
   const connection = useRef<Room | null>(null);
   const prepared = useRef<string | null>(null);
   const [status, setStatus] = useState('Connecting…');
@@ -37,8 +41,14 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const [everConnected, setEverConnected] = useState(false);
   const [pending, setPending] = useState(false);
   const [revision, setRevision] = useState(0);
-  const [showMod, setShowMod] = useState(false);
-  const [showShare, setShowShare] = useState(false);
+  const [drawer, setDrawer] = useState<keyof typeof drawerTitles | null>(null);
+  const [fit, setFit] = useState(false);
+  const [hideChat, setHideChat] = useState(false);
+  const [localVideo, setLocalVideo] = useState<LocalVideoTrack | null>(null);
+  const [look, setLook] = useState<CameraLook>(cameraLooks[0]);
+  const [strength, setStrength] = useState(75);
+  const [effectPending, setEffectPending] = useState(false);
+  const [effectError, setEffectError] = useState('');
   const [shareNotice, setShareNotice] = useState('');
   const [reporting, setReporting] = useState<{ id: string; label: string }>();
   const [camera, setCamera] = useState(true);
@@ -58,6 +68,37 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const chatAllowed = canModerate || (state?.room.chat_open && (!state.self.mutedUntil || new Date(state.self.mutedUntil).getTime() <= clock));
   const sync = () => setRevision(value => value + 1);
   const shareUrl = () => new URL('/?live=' + grant.shareCode, window.location.origin).href;
+  const toggleDrawer = (panel: keyof typeof drawerTitles) => setDrawer(current => current === panel ? null : panel);
+
+  async function applyLook(next: CameraLook) {
+    const track = localVideo;
+    if (!track || effectPending) return;
+    setEffectPending(true);
+    setEffectError('');
+    const current = track.getProcessor();
+    let created: CameraEffects | undefined;
+    try {
+      if (next.id === 'off') {
+        if (current instanceof CameraEffects) await track.stopProcessor(false);
+      } else if (current instanceof CameraEffects) {
+        current.setLook(next, strength);
+      } else {
+        created = new CameraEffects(next, strength, () => {
+          if (track.getProcessor() !== created) return;
+          void track.stopProcessor(false).then(() => {
+            setLook(cameraLooks[0]);
+            setEffectError('The camera effect stopped. Viewers are seeing Original.');
+          }).catch(() => setEffectError('The camera effect stopped. Turn your camera off and back on to retry.'));
+        });
+        await track.setProcessor(created, true);
+      }
+      setLook(next);
+    } catch {
+      if (created && track.getProcessor() === created) await track.stopProcessor(false).catch(() => undefined);
+      else await created?.destroy();
+      setEffectError('Could not switch camera effects on this device.');
+    } finally { setEffectPending(false); }
+  }
 
   async function shareRoom(action: 'link' | 'code' | 'share') {
     setShareNotice('');
@@ -110,9 +151,14 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       if (publication.source !== Track.Source.Camera || !publication.track) return;
       const element = publication.track.attach();
       element.muted = true;
+      if (element instanceof HTMLVideoElement) element.playsInline = true;
       container(person.identity).append(element);
+      if (publication.track instanceof LocalVideoTrack) setLocalVideo(publication.track);
     });
-    room.on(RoomEvent.LocalTrackUnpublished, publication => publication.track?.detach().forEach(element => element.remove()));
+    room.on(RoomEvent.LocalTrackUnpublished, publication => {
+      publication.track?.detach().forEach(element => element.remove());
+      if (publication.source === Track.Source.Camera) setLocalVideo(null);
+    });
     room.on(RoomEvent.TrackSubscribed, (track, _publication, person) => {
       const element = track.attach();
       if (element instanceof HTMLVideoElement) {
@@ -130,6 +176,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       host.replaceChildren();
       guest.replaceChildren();
       audio.replaceChildren();
+      setLocalVideo(null);
       setConnected(false);
       setStatus('Disconnected');
       refresh();
@@ -210,8 +257,13 @@ export default function Broadcast({ grant, user, signIn, leave }: {
 
   useEffect(() => {
     const node = chatList.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [state?.messages.at(-1)?.id]);
+    if (node && followChat.current) node.scrollTop = node.scrollHeight;
+  }, [state?.messages.at(-1)?.id, hideChat, state?.room.pinned_id]);
+
+  useEffect(() => {
+    setLook(cameraLooks[0]);
+    setEffectError('');
+  }, [localVideo]);
 
   async function perform(operation: () => Promise<unknown>, notice = '') {
     if (pending) return;
@@ -260,114 +312,153 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const pinned = state?.messages.find(message => message.id === state.room.pinned_id);
 
   return <div className="arena">
-    <div className="live-status">
-      <span role="status">{state?.room.ended ? 'Broadcast ended.' : grant.guest && state?.room.guest_access === false ? 'Guest watching is off.' : status}</span>
-      <div className="arena-buttons">
-        {connected && grant.shareCode && <button className="secondary" onClick={() => setShowShare(value => !value)} aria-expanded={showShare}>
-          <Share2 size={16} /> Share LIVE
-        </button>}
-        {canModerate && <button className="secondary" onClick={() => setShowMod(value => !value)} aria-expanded={showMod}><Shield size={16} /> Moderation</button>}
-        <button className="secondary" disabled={pending} onClick={exit}>{grant.host ? 'End broadcast' : 'Leave'}</button>
-      </div>
-    </div>
-    {connected && showShare && grant.shareCode && <section className="live-handoff" aria-label="Share this LIVE">
-      <h3>Invite people to this LIVE</h3>
-      <p className="hint">Share the link or tell viewers to enter this code in Tiktok mwitu.</p>
-      <label>LIVE code<input readOnly value={grant.shareCode} onFocus={event => event.target.select()} /></label>
-      <label>Share link<input readOnly value={shareUrl()} onFocus={event => event.target.select()} /></label>
-      <div className="arena-buttons">
-        <button className="secondary" onClick={() => void shareRoom('link')}>Copy link</button>
-        <button className="secondary" onClick={() => void shareRoom('code')}>Copy code</button>
-        {typeof navigator.share === 'function' && <button className="primary" onClick={() => void shareRoom('share')}>Share link</button>}
-      </div>
-      {shareNotice && <p role="status">{shareNotice}</p>}
-    </section>}
-    <div className={'arena-media' + (split ? ' split' : '')}>
-      <div className="arena-tile"><div ref={hostVideo} /><span>Host</span></div>
+    <div className={'arena-media' + (split ? ' split' : '') + (fit ? ' fit' : '')}>
+      <div className="arena-tile"><div ref={hostVideo} />{split && <span>Host</span>}</div>
       <div className="arena-tile" hidden={!split}><div ref={guestVideo} /><span>{match?.guest_name}</span></div>
     </div>
-    <div ref={audioBox} />
-    <div className="arena-buttons">
-      {enableAudio && <button className="link" onClick={() => void connection.current?.startAudio().catch(() => setError('Could not enable audio.'))}>Enable sound</button>}
-      {connected && isPublisher && <>
-        <button className="icon" aria-label={camera ? 'Turn camera off' : 'Turn camera on'} disabled={pending} onClick={() => toggleDevice('camera')}>{camera ? <Camera size={19} /> : <CameraOff size={19} />}</button>
-        <button className="icon" aria-label={mic ? 'Mute microphone' : 'Unmute microphone'} disabled={pending} onClick={() => toggleDevice('mic')}>{mic ? <Mic size={19} /> : <MicOff size={19} />}</button>
-      </>}
-    </div>
-    {match?.status === 'running' && <section className="battle" aria-label="1v1 scoreboard">
-      <div className="battle-head"><span><Swords size={17} /> 1v1 LIVE</span><strong>{countdown}</strong></div>
-      <div className="battle-score">
-        <div><small>Host</small><strong>{match.host_score}</strong></div>
-        <div><small>{match.guest_name}</small><strong>{match.guest_score}</strong></div>
-      </div>
+    <div ref={audioBox} hidden />
+    <div className="arena-top">
+      <span className={'arena-status' + (connected && !state?.room.ended ? ' on-air' : '')} role="status">
+        {state?.room.ended ? 'Broadcast ended.' : grant.guest && state?.room.guest_access === false ? 'Guest watching is off.' : connected ? 'LIVE' : status}
+      </span>
       <div className="arena-buttons">
-        {canVote && <>
-          <button className="secondary" disabled={pending} onClick={() => void matchAction('vote', { side: 'host' })}><Heart size={16} /> Vote host</button>
-          <button className="secondary" disabled={pending} onClick={() => void matchAction('vote', { side: 'guest' })}><Heart size={16} /> Vote challenger</button>
-        </>}
-        {match.voted && <small>You voted for the {match.voted === 'host' ? 'host' : 'challenger'}.</small>}
-        {isPublisher && <button className="link" disabled={pending} onClick={() => {
-          if (window.confirm('Forfeit this match?')) void matchAction('forfeit');
-        }}>Forfeit match</button>}
+        <button className="arena-action" aria-label={fit ? 'Fill screen' : 'Fit entire video'} title={fit ? 'Fill screen' : 'Fit entire video'} aria-pressed={fit} onClick={() => setFit(value => !value)}>{fit ? <Maximize size={18} /> : <Minimize size={18} />}</button>
+        {connected && grant.shareCode && <button className="arena-action" aria-label="Share LIVE" title="Share LIVE" onClick={() => toggleDrawer('share')} aria-expanded={drawer === 'share'}><Share2 size={18} /></button>}
+        {canModerate && <button className="arena-action" aria-label="Moderation" title="Moderation" onClick={() => toggleDrawer('moderation')} aria-expanded={drawer === 'moderation'}><Shield size={18} /></button>}
+        <button className="arena-action" aria-label={grant.host ? 'End broadcast' : 'Leave'} title={grant.host ? 'End broadcast' : 'Leave'} disabled={pending} onClick={exit}><X size={21} /></button>
       </div>
-    </section>}
-    {match?.status === 'finished' && <section className="battle" aria-label="Match result">
-      <div className="battle-head"><span><Swords size={17} /> {match.winner_id === null ? 'Draw' : (match.winner_id === grant.hostId ? 'Host wins' : match.guest_name + ' wins')}</span>
-        <strong>{match.host_score} – {match.guest_score}</strong></div>
-      {match.outcome !== 'time' && <small>Match ended early.</small>}
-    </section>}
-    {match && ['invited','ready'].includes(match.status) && (match.status === 'ready' || grant.host || match.guest_id === user?.id) &&
-      <div className="battle">
-        <p>{match.status === 'ready' ? 'Waiting for the challenger to publish video…' :
-          match.guest_id === user?.id ? 'The host invited you to a 1v1 LIVE battle.' : 'Seat reserved for ' + match.guest_name + '. Share the LIVE link or code so they can join.'}</p>
-        <div className="arena-buttons">
-          {connected && match.guest_id === user?.id && match.status === 'invited' && <>
-            <button className="primary" disabled={pending} onClick={() => void matchAction('accept')}>Accept challenge</button>
-            <button className="secondary" disabled={pending} onClick={() => void matchAction('decline')}>Decline</button>
-          </>}
-          {grant.host && connected && <button className="secondary" disabled={pending} onClick={() => void matchAction('cancel')}>Cancel challenge</button>}
+    </div>
+    <div className="arena-match">
+      {match?.status === 'running' && <section className="battle" aria-label="1v1 scoreboard">
+        <div className="battle-head"><span><Swords size={17} /> 1v1 LIVE</span><strong>{countdown}</strong></div>
+        <div className="battle-score">
+          <div><small>Host</small><strong>{match.host_score}</strong></div>
+          <div><small>{match.guest_name}</small><strong>{match.guest_score}</strong></div>
         </div>
+        <div className="arena-buttons">
+          {canVote && <>
+            <button className="secondary" disabled={pending} onClick={() => void matchAction('vote', { side: 'host' })}><Heart size={16} /> Vote host</button>
+            <button className="secondary" disabled={pending} onClick={() => void matchAction('vote', { side: 'guest' })}><Heart size={16} /> Vote challenger</button>
+          </>}
+          {match.voted && <small>You voted for the {match.voted === 'host' ? 'host' : 'challenger'}.</small>}
+          {isPublisher && <button className="link" disabled={pending} onClick={() => {
+            if (window.confirm('Forfeit this match?')) void matchAction('forfeit');
+          }}>Forfeit match</button>}
+        </div>
+      </section>}
+      {match?.status === 'finished' && <section className="battle" aria-label="Match result">
+        <div className="battle-head"><span><Swords size={17} /> {match.winner_id === null ? 'Draw' : (match.winner_id === grant.hostId ? 'Host wins' : match.guest_name + ' wins')}</span>
+          <strong>{match.host_score} – {match.guest_score}</strong></div>
+        {match.outcome !== 'time' && <small>Match ended early.</small>}
+      </section>}
+      {match && ['invited','ready'].includes(match.status) && (match.status === 'ready' || grant.host || match.guest_id === user?.id) &&
+        <div className="battle">
+          <p>{match.status === 'ready' ? 'Waiting for the challenger to publish video…' :
+            match.guest_id === user?.id ? 'The host invited you to a 1v1 LIVE battle.' : 'Seat reserved for ' + match.guest_name + '. Share the LIVE link or code so they can join.'}</p>
+          <div className="arena-buttons">
+            {connected && match.guest_id === user?.id && match.status === 'invited' && <>
+              <button className="primary" disabled={pending} onClick={() => void matchAction('accept')}>Accept challenge</button>
+              <button className="secondary" disabled={pending} onClick={() => void matchAction('decline')}>Decline</button>
+            </>}
+            {grant.host && connected && <button className="secondary" disabled={pending} onClick={() => void matchAction('cancel')}>Cancel challenge</button>}
+          </div>
+        </div>}
+      {match?.status === 'cancelled' && <p className="hint">Challenge {match.outcome === 'guest_removed' ? 'ended' : match.outcome}.</p>}
+      {grant.host && connected && (!match || ['finished','cancelled'].includes(match.status)) &&
+        <form className="inline" onSubmit={event => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const handle = String(new FormData(form).get('handle')).trim().replace(/^@/, '');
+          void matchAction('invite', { handle });
+        }}>
+          <input name="handle" aria-label="Challenger handle" required maxLength={25} placeholder="Challenger’s @handle on Tiktok mwitu" />
+          <button className="primary" disabled={pending}><Swords size={17} /> Invite to 1v1</button>
+        </form>}
+    </div>
+    <div className="arena-foot">
+      {!hideChat && <div className="arena-conversation">
+        {pinned && <p className="pinned"><strong>Pinned · @{pinned.handle}</strong> {pinned.body}</p>}
+        <div className="live-chat" ref={chatList} role="log" aria-label="LIVE chat" onScroll={event => {
+          const node = event.currentTarget;
+          followChat.current = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
+        }}>
+          {state?.messages.filter(message => message.id !== pinned?.id).map(message =>
+            <div key={message.id} className="live-message"><p><strong>@{message.handle}</strong> {message.body}</p>
+              {connected && user && message.user_id !== user.id && <button className="link" onClick={() => setReporting({ id: message.user_id, label: '@' + message.handle })}>Report</button>}
+            </div>)}
+        </div>
+        {connected && user && chatAllowed ? <form className="inline" onSubmit={event => submit(event, '/chat', { body: new FormData(event.currentTarget).get('body') })}>
+          <input name="body" aria-label="Live chat message" placeholder="Chat with the room…" maxLength={300} required />
+          <button className="primary" disabled={pending} aria-label="Send chat message"><Send size={17} /></button>
+        </form> : connected && user && state && <p className="hint">{state.room.chat_open ? 'Your chat is timed out.' : 'Chat is closed.'}</p>}
+        {grant.guest && !state?.room.ended && <div className="arena-buttons">
+          {connected && <span className="hint">Watching as a guest</span>}
+          <button className="link" onClick={signIn}>Sign in to chat or vote</button>
+        </div>}
       </div>}
-    {match?.status === 'cancelled' && <p className="hint">Challenge {match.outcome === 'guest_removed' ? 'ended' : match.outcome}.</p>}
-    {grant.host && connected && (!match || ['finished','cancelled'].includes(match.status)) &&
-      <form className="inline" onSubmit={event => {
+      <div className="arena-buttons arena-tools">
+        <button className="arena-action" aria-label={hideChat ? 'Show chat' : 'Hide chat'} title={hideChat ? 'Show chat' : 'Hide chat'} aria-pressed={!hideChat} onClick={() => {
+          followChat.current = true;
+          setHideChat(value => !value);
+        }}><MessageCircle size={19} /></button>
+        {enableAudio && <button className="arena-action arena-pill" onClick={() => void connection.current?.startAudio().catch(() => setError('Could not enable audio.'))}>Enable sound</button>}
+        {connected && isPublisher && <>
+          <button className="arena-action" aria-label={camera ? 'Turn camera off' : 'Turn camera on'} title={camera ? 'Turn camera off' : 'Turn camera on'} disabled={pending || effectPending} onClick={() => toggleDevice('camera')}>{camera ? <Camera size={19} /> : <CameraOff size={19} />}</button>
+          <button className="arena-action" aria-label={mic ? 'Mute microphone' : 'Unmute microphone'} title={mic ? 'Mute microphone' : 'Unmute microphone'} disabled={pending} onClick={() => toggleDevice('mic')}>{mic ? <Mic size={19} /> : <MicOff size={19} />}</button>
+          <button className="arena-action arena-pill" aria-label="Camera effects" aria-expanded={drawer === 'effects'} onClick={() => toggleDrawer('effects')}><Sparkles size={18} /> Effects</button>
+        </>}
+        {connected && user && !grant.host && <button className="arena-action" aria-label="Report broadcast" title="Report broadcast" onClick={() => setReporting({ id: grant.hostId, label: 'host' })}><Flag size={17} /></button>}
+      </div>
+      {reporting && <form className="inline" onSubmit={event => {
         event.preventDefault();
         const form = event.currentTarget;
-        const handle = String(new FormData(form).get('handle')).trim().replace(/^@/, '');
-        void matchAction('invite', { handle });
+        const reason = new FormData(form).get('reason');
+        void perform(async () => { await send(path + '/report', 'POST', { userId: reporting.id, reason }); setReporting(undefined); }, 'Report submitted.');
       }}>
-        <input name="handle" aria-label="Challenger handle" required maxLength={25} placeholder="Challenger’s @handle on Tiktok mwitu" />
-        <button className="primary" disabled={pending}><Swords size={17} /> Invite to 1v1</button>
+        <input name="reason" aria-label={'Reason for reporting ' + reporting.label} required maxLength={300} placeholder={'Report ' + reporting.label} />
+        <button className="primary" disabled={pending}>Submit report</button>
+        <button type="button" className="secondary" onClick={() => setReporting(undefined)}>Cancel</button>
       </form>}
-    {pinned && <p className="pinned"><strong>Pinned · @{pinned.handle}</strong> {pinned.body}</p>}
-    <div className="list live-chat" ref={chatList} aria-live="polite">
-      {state?.messages.filter(message => message.id !== pinned?.id).map(message =>
-        <div key={message.id} className="live-message"><p><strong>@{message.handle}</strong> {message.body}</p>
-          {connected && user && message.user_id !== user.id && <button className="link" onClick={() => setReporting({ id: message.user_id, label: '@' + message.handle })}>Report</button>}
-        </div>)}
+      {liveNotice && <p className="arena-notice" role="status">{liveNotice}</p>}
+      {(error || snapshot?.error) && <p className="arena-notice error" role="alert">{error || snapshot?.error}</p>}
     </div>
-    {connected && user && chatAllowed ? <form className="inline" onSubmit={event => submit(event, '/chat', { body: new FormData(event.currentTarget).get('body') })}>
-      <input name="body" aria-label="Live chat message" placeholder="Chat with the room…" maxLength={300} required />
-      <button className="primary" disabled={pending} aria-label="Send chat message"><Send size={17} /></button>
-    </form> : connected && user && state && <p className="hint">{state.room.chat_open ? 'Your chat is timed out.' : 'Chat is closed.'}</p>}
-    {grant.guest && !state?.room.ended && <div className="arena-buttons">
-      {connected && <span className="hint">Watching as a guest</span>}
-      <button className="link" onClick={signIn}>Sign in to chat or vote</button>
-    </div>}
-    {connected && user && !grant.host && <button className="link" onClick={() => setReporting({ id: grant.hostId, label: 'host' })}>Report broadcast</button>}
-    {reporting && <form className="inline" onSubmit={event => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const reason = new FormData(form).get('reason');
-      void perform(async () => { await send(path + '/report', 'POST', { userId: reporting.id, reason }); setReporting(undefined); }, 'Report submitted.');
-    }}>
-      <input name="reason" aria-label={'Reason for reporting ' + reporting.label} required maxLength={300} placeholder={'Report ' + reporting.label} />
-      <button className="primary" disabled={pending}>Submit report</button>
-      <button type="button" className="secondary" onClick={() => setReporting(undefined)}>Cancel</button>
-    </form>}
-    {showMod && canModerate && state && user && <LiveModeration path={path} user={user} hostId={grant.hostId} chatOpen={state.room.chat_open}
-      guestAccess={state.room.guest_access} messages={state.messages} pinnedId={state.room.pinned_id} revision={revision} ended={state.room.ended} onChange={sync} />}
-    {liveNotice && <p role="status">{liveNotice}</p>}
-    {(error || snapshot?.error) && <p className="error" role="alert">{error || snapshot?.error}</p>}
+    {drawer && <section className="arena-drawer" aria-label={drawerTitles[drawer]}>
+      <div className="arena-drawer-heading">
+        <h3>{drawerTitles[drawer]}</h3>
+        <button className="arena-action" onClick={() => setDrawer(null)} aria-label={'Close ' + drawerTitles[drawer]}><X size={19} /></button>
+      </div>
+      {drawer === 'share' && connected && grant.shareCode && <div className="arena-share">
+        <label>LIVE code<input readOnly value={grant.shareCode} onFocus={event => event.target.select()} /></label>
+        <label>Share link<input readOnly value={shareUrl()} onFocus={event => event.target.select()} /></label>
+        <div className="arena-buttons">
+          <button className="secondary" onClick={() => void shareRoom('link')}>Copy link</button>
+          <button className="secondary" onClick={() => void shareRoom('code')}>Copy code</button>
+          {typeof navigator.share === 'function' && <button className="primary" onClick={() => void shareRoom('share')}>Share link</button>}
+        </div>
+        {shareNotice && <p role="status">{shareNotice}</p>}
+      </div>}
+      {drawer === 'moderation' && canModerate && state && user && <LiveModeration path={path} user={user} hostId={grant.hostId} chatOpen={state.room.chat_open}
+        guestAccess={state.room.guest_access} messages={state.messages} pinnedId={state.room.pinned_id} revision={revision} ended={state.room.ended} onChange={sync} />}
+      {drawer === 'effects' && isPublisher && <>
+        <p className="hint">{camera && localVideo ? 'Changes your camera for everyone watching.' : 'Turn on your camera to use effects.'}</p>
+        <div className="arena-looks" aria-label="Camera presets">
+          {cameraLooks.map(preset => <button className="arena-look" key={preset.id} type="button" aria-pressed={look.id === preset.id}
+            disabled={!localVideo || !camera || pending || effectPending || !connected} onClick={() => void applyLook(preset)}>
+            <span aria-hidden="true" style={{ background: 'linear-gradient(145deg,' + preset.colors.join(',') + ')' }} />
+            <strong>{preset.name}</strong><small>{preset.description}</small>
+          </button>)}
+        </div>
+        {look.id !== 'off' && <div className="arena-strength">
+          <div><label htmlFor="camera-effect-intensity">Intensity</label><output htmlFor="camera-effect-intensity">{strength}%</output></div>
+          <input id="camera-effect-intensity" type="range" min={0} max={100} value={strength} disabled={effectPending || !camera} onChange={event => {
+            const value = event.currentTarget.valueAsNumber;
+            const processor = localVideo?.getProcessor();
+            if (processor instanceof CameraEffects) processor.setLook(look, value);
+            setStrength(value);
+          }} />
+        </div>}
+        {effectError && <p className="error" role="alert">{effectError}</p>}
+      </>}
+    </section>}
   </div>;
 }
