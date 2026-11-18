@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 WORKDIR /app
 COPY --from=api-build /app/node_modules ./node_modules
 COPY --from=api-build /app/apps/api/dist ./dist
-RUN mkdir /media && chown node:node /media
+RUN mkdir -p /media && chown node:node /media
 USER node
 ENV NODE_ENV=production API_HOST=0.0.0.0 MEDIA_DIR=/media
 EXPOSE 4000
