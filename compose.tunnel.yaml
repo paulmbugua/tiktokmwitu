@@ -1,0 +1,19 @@
+services:
+  api:
+    networks:
+      default:
+      rivera_tunnel:
+        aliases:
+          - tiktokmwitu-api
+    environment:
+      TRUST_PROXY_HOPS: 0
+      TRUST_CLOUDFLARE_TUNNEL: "true"
+  web:
+    profiles: ["local-edge"]
+  edge:
+    profiles: ["local-edge"]
+
+networks:
+  rivera_tunnel:
+    external: true
+    name: ${RIVERA_TUNNEL_NETWORK:-rivera_edge}

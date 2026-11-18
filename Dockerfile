@@ -9,14 +9,22 @@ COPY apps ./apps
 ENV INTERNAL_API_URL=http://api:4000 NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-FROM build AS production-deps
+FROM node:22-bookworm-slim AS api-build
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/
+RUN npm ci -w api --include-workspace-root=false
+COPY apps/api ./apps/api
+RUN npm run build -w api && npm prune -w api --omit=dev --include-workspace-root=false
+
+FROM build AS web-deps
 RUN npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS api
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=production-deps /app/node_modules ./node_modules
-COPY --from=build /app/apps/api/dist ./dist
+COPY --from=api-build /app/node_modules ./node_modules
+COPY --from=api-build /app/apps/api/dist ./dist
 RUN mkdir /media && chown node:node /media
 USER node
 ENV NODE_ENV=production API_HOST=0.0.0.0 MEDIA_DIR=/media
@@ -25,7 +33,7 @@ CMD ["node","dist/main.js"]
 
 FROM node:22-bookworm-slim AS web
 WORKDIR /app
-COPY --from=production-deps /app/node_modules ./node_modules
+COPY --from=web-deps /app/node_modules ./node_modules
 COPY --from=build /app/apps/web/package.json /app/apps/web/next.config.mjs ./apps/web/
 COPY --from=build --chown=node:node /app/apps/web/.next ./apps/web/.next
 WORKDIR /app/apps/web

@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Server } from 'socket.io';
 import { mkdir } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import { join } from 'node:path';
 import type { Request, Response, NextFunction } from 'express';
 import { AuthController } from './auth';
@@ -28,7 +29,15 @@ class HealthController {
 }
 
 @Module({
-  imports: [ThrottlerModule.forRoot([{ ttl: 60000, limit: 300 }])],
+  imports: [ThrottlerModule.forRoot({
+    throttlers: [{ ttl: 60000, limit: 300 }],
+    getTracker: request => {
+      const req = request as Request;
+      const clientIp = req.get('cf-connecting-ip');
+      if (process.env.TRUST_CLOUDFLARE_TUNNEL === 'true' && clientIp && isIP(clientIp)) return clientIp;
+      return req.ip ?? req.socket.remoteAddress ?? 'unknown';
+    },
+  })],
   controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, AdminController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
