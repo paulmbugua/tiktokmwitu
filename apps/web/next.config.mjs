@@ -4,6 +4,7 @@ const cloudflare = process.env.MWITU_STATIC_EXPORT === '1';
 
 /** @type {import('next').NextConfig} */
 const config = {
+  agentRules: false,
   poweredByHeader: false,
   ...(cloudflare
     ? { output: 'export' }

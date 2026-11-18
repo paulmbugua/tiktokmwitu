@@ -2,7 +2,7 @@
   "name": "web",
   "private": true,
   "scripts": {
-    "dev": "node --env-file-if-exists=../../.env ../../node_modules/next/dist/bin/next dev",
+    "dev": "node dev.mjs dev",
     "build": "next build",
     "build:cloudflare": "node cloudflare/build.mjs",
     "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",
