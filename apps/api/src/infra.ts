@@ -9,6 +9,8 @@ import { z } from 'zod';
 
 export const db = new Pool({ connectionString: process.env.DATABASE_URL, statement_timeout: 10000 });
 export const origin = process.env.APP_ORIGIN ?? 'http://localhost:3000';
+export const adminOrigin = process.env.ADMIN_ORIGIN || origin;
+export const allowedOrigins = [...new Set([origin, adminOrigin])];
 export const cookie = 'mwitu_session';
 export const cookieOptions = {
   httpOnly: true,

@@ -3,6 +3,8 @@
 **/node_modules
 **/.next
 **/dist
+**/out
+**/.wrangler
 **/media
 .env*
 *.log

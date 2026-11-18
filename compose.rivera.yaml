@@ -7,11 +7,7 @@ services:
         aliases:
           - tiktokmwitu-api
   web:
-    networks:
-      default:
-      shared_edge:
-        aliases:
-          - tiktokmwitu-web
+    profiles: ["local-edge"]
   edge:
     profiles: ["local-edge"]
 

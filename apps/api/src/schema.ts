@@ -58,4 +58,12 @@ CREATE TABLE IF NOT EXISTS reports (
   reason varchar(500) NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY(video_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS moderation_actions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_id uuid NOT NULL REFERENCES users,
+  video_id uuid NOT NULL,
+  action text NOT NULL CHECK (action IN ('dismiss', 'remove')),
+  report_count integer NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
 );`;

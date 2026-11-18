@@ -1,5 +1,5 @@
-# Add this block to the running Rivera Caddy's configuration and replace the hostname.
-mwitu.example.com {
+# Add this block to the running Rivera Caddy's configuration.
+api.tiktokmwitu.co.ke {
 	encode zstd gzip
 	handle /api/* {
 		request_body {
@@ -12,6 +12,6 @@ mwitu.example.com {
 		reverse_proxy tiktokmwitu-api:4000
 	}
 	handle {
-		reverse_proxy tiktokmwitu-web:3000
+		respond 404
 	}
 }

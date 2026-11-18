@@ -11,7 +11,8 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Request, Response, NextFunction } from 'express';
 import { AuthController } from './auth';
-import { connectRealtime, cookie, db, digest, identity, mediaDir, origin } from './infra';
+import { allowedOrigins, connectRealtime, cookie, db, digest, identity, mediaDir, origin } from './infra';
+import { AdminController } from './admin';
 import { schema } from './schema';
 import { SocialController } from './social';
 import { LiveController } from './live';
@@ -28,7 +29,7 @@ class HealthController {
 
 @Module({
   imports: [ThrottlerModule.forRoot([{ ttl: 60000, limit: 300 }])],
-  controllers: [AuthController, HealthController, SocialController, VideosController, LiveController],
+  controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, AdminController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 class AppModule {}
@@ -41,15 +42,34 @@ async function start() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
   app.use(helmet());
+  app.enableCors({
+    origin: (requestOrigin, done) => done(null, !!requestOrigin && allowedOrigins.includes(requestOrigin)),
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'X-Mwitu-Request'],
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    maxAge: 600,
+  });
   app.use(cookieParser());
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     res.setHeader('Cache-Control', 'no-store');
+    const requestOrigin = req.get('origin');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)
-      && (req.get('x-mwitu-request') !== '1' || (req.get('origin') && req.get('origin') !== origin))) {
+      && (req.get('x-mwitu-request') !== '1' || (requestOrigin && !allowedOrigins.includes(requestOrigin)))) {
       res.status(403).json({ message: 'Request origin is invalid.' });
       return;
     }
     next();
+  });
+  app.use('/media', async (req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+    res.setHeader('Cache-Control', 'private, no-cache');
+    const match = /^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.mp4$/.exec(req.path);
+    if (!match || !['GET', 'HEAD'].includes(req.method)) { res.sendStatus(404); return; }
+    try {
+      const video = await db.query('SELECT 1 FROM videos WHERE id=$1', [match[1]]);
+      if (!video.rowCount) { res.sendStatus(404); return; }
+      next();
+    } catch (error) { next(error); }
   });
   app.useStaticAssets(publicMedia, { prefix: '/media', dotfiles: 'deny', index: false });
   app.setGlobalPrefix('api');

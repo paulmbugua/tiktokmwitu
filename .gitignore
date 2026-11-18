@@ -7,3 +7,5 @@ dist/
 media/
 *.log
 next-env.d.ts
+out/
+.wrangler/

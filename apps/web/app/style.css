@@ -94,6 +94,17 @@ textarea{min-height:82px;resize:vertical}
 .live-media{display:grid;place-items:center;background:#0b100d;border-radius:9px;overflow:hidden;min-height:100px}
 .live-media video{display:block;max-height:37vh;width:100%;object-fit:contain}
 .live-chat{max-height:15vh;margin-top:8px;overflow-wrap:anywhere}
+.moderation{max-width:850px;margin:0 auto;padding:28px 18px 60px}
+.moderation header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
+.moderation-login,.moderation-report{border:1px solid var(--line);background:var(--panel);border-radius:15px;padding:16px}
+.moderation-login{max-width:380px;display:grid;gap:12px}
+.moderation-login label{display:grid;gap:5px;font-weight:650}
+.moderation-login input{min-width:0;background:#101512;border:1px solid #364239;border-radius:9px;padding:10px}
+.moderation-report{display:grid;gap:10px;margin-bottom:12px;overflow-wrap:anywhere}
+.moderation-report ul{margin:8px 0;padding-left:25px}
+.moderation-report video{width:min(100%,260px);max-height:36vh;background:#0b100d;border-radius:8px}
+.moderation-actions{display:flex;flex-wrap:wrap;gap:8px}
+.moderation-actions .danger{color:#ffaaa6}
 .error{color:#ffaaa6;margin-top:11px}
 .toast{position:fixed;bottom:20px;left:50%;translate:-50%;background:#263522;border:1px solid #596c4c;padding:9px 16px;border-radius:10px;max-width:85%;z-index:5}
 @media(max-width:850px){

@@ -17,24 +17,45 @@ For native development, install PostgreSQL and FFmpeg, create a database, and se
 
 The empty feed fills when users publish. Use two accounts in separate browser profiles to try private messaging and see likes or comments update in real time.
 
-## Deploy on the VPS
+## Production hostnames
 
-Clone the [GitHub repository](https://github.com/paulmbugua/tiktokmwitu) and create a server-only `.env`. Set `POSTGRES_PASSWORD`, `MWITU_DOMAIN` to the DNS hostname, and `APP_ORIGIN` to its exact HTTPS URL. Point DNS to the VPS.
+- `https://tiktokmwitu.co.ke` serves the short-video app on Cloudflare Workers Static Assets.
+- `https://admin.tiktokmwitu.co.ke` serves the moderation interface from the same Worker. NestJS verifies moderator permissions before returning reports or accepting actions.
+- `https://api.tiktokmwitu.co.ke` serves NestJS, uploaded media, and Socket.IO on Rivera’s VPS.
 
-On a VPS where this app owns ports 80 and 443:
+### Cloudflare DNS and web deployment
 
-```sh
-docker compose -f compose.yaml -f compose.production.yaml up -d --build
+1. Add `tiktokmwitu.co.ke` as a Cloudflare zone. Import and verify existing DNS records, including email records, before updating nameservers at the current registrar. Cloudflare DNS and Workers can be used while registration stays with the current registrar. Check [registrar transfer eligibility](https://developers.cloudflare.com/registrar/top-level-domains/) separately.
+2. Create a DNS-only `A` record for `api` pointing to the VPS. Add an `AAAA` record only if Rivera also serves the site over IPv6. Caddy obtains the origin certificate directly. Keep ports 80 and 443 available on the VPS for Caddy.
+3. With an authenticated Wrangler session for the account that owns the zone, run `npm ci` followed by `npm run deploy:cloudflare -w web`. Wrangler builds the static Next.js app and attaches the apex and admin hostnames as Worker Custom Domains. Resolve any existing DNS record conflicts for those two hostnames before first attaching them.
+
+The app makes credentialed HTTPS requests directly to the API and opens Socket.IO there over WSS. The API accepts the two web origins and stores sessions in an API-host-only cookie. Keep all three public hostnames on HTTPS.
+
+### Deploy the API on Rivera’s VPS
+
+Clone the [GitHub repository](https://github.com/paulmbugua/tiktokmwitu) and copy `.env.example` to a server-only `.env`. Set a unique `POSTGRES_PASSWORD` and these two origins:
+
+```dotenv
+APP_ORIGIN=https://tiktokmwitu.co.ke
+ADMIN_ORIGIN=https://admin.tiktokmwitu.co.ke
 ```
 
-On Rivera’s VPS, use its existing Caddy so both apps can share the public ports:
-
 1. Confirm the running Rivera Caddy is attached to `rivera_default` or set `RIVERA_EDGE_NETWORK` to one of its existing networks.
-2. Run `docker compose -f compose.yaml -f compose.rivera.yaml up -d --build`.
-3. Add the block from `deploy/Caddyfile.rivera.example` to Rivera’s Caddy configuration, using the real domain. Validate the file before reloading Caddy.
-4. Check `/api/health` on the public domain. Sign in and publish a clip, then verify video playback and an inbox update from a second account.
+2. Run `docker compose -f compose.yaml -f compose.rivera.yaml up -d --build` to start PostgreSQL and NestJS.
+3. Add the block from `deploy/Caddyfile.rivera.example` to Rivera’s Caddy configuration. Validate the file before reloading Caddy.
+4. Check `https://api.tiktokmwitu.co.ke/api/health`. Sign in and publish a clip from the Cloudflare site, then verify playback and an inbox update from a second account.
 
-Set up regular backups of PostgreSQL and the media volume before accepting public uploads. Keep one API replica with this configuration. The upload encoder and socket rooms are process-local. Review reports through PostgreSQL and remove flagged content before opening sign-ups broadly. Use the reports table to find the video and its reason. A moderator can remove a video by deleting its row and the matching `public/<video-id>.mp4` file from the media volume.
+### Provision moderators
+
+Create the moderator’s account through the public site. Confirm they control that account, then obtain the immutable user ID from PostgreSQL:
+
+```sh
+docker compose exec db psql -U mwitu -d mwitu -c "SELECT id,handle FROM users WHERE handle='moderator_handle';"
+```
+
+Add the verified ID to `ADMIN_USER_IDS` in the VPS `.env`. Separate multiple IDs with commas and rerun the Rivera Compose command to apply the change. That account can log in at `https://admin.tiktokmwitu.co.ke`, inspect reported videos, dismiss reports, or remove a video. Decisions are recorded in `moderation_actions`. Leaving the allowlist empty disables moderator access. For native development, visit `http://localhost:3000/admin` with a local account ID allowlisted.
+
+Back up PostgreSQL and the media volume together. Keep one API replica with this configuration because the upload encoder and socket rooms are process-local.
 
 ## Enable live broadcasts
 

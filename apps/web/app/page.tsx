@@ -9,7 +9,7 @@ import {
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { io } from 'socket.io-client';
 import dynamic from 'next/dynamic';
-import { api, send, useData, type Comment, type Feed, type Inbox, type Message, type Person, type Profile, type Video } from './client';
+import { api, mediaUrl, send, useData, type Comment, type Feed, type Inbox, type Message, type Person, type Profile, type Video } from './client';
 
 type Tab = 'For You' | 'Following' | 'Discover';
 type Panel =
@@ -69,7 +69,7 @@ function Clip({ video, root, muted, onMute, children, profile }: {
   }, [root]);
   return <article className="clip" ref={section} data-clip={video.id}>
     <div className="stage">
-      <video ref={player} src={'/media/' + video.id + '.mp4'} loop muted={muted} playsInline preload="none"
+      <video ref={player} src={mediaUrl(video.id)} loop muted={muted} playsInline preload="none"
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => setFailed(true)} />
       <button className="play-area" aria-label={playing ? 'Pause video' : 'Play video'} onClick={() => {
         const media = player.current;
@@ -122,9 +122,9 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const localSocket = process.env.NEXT_PUBLIC_REALTIME_URL
+    const localSocket = process.env.NEXT_PUBLIC_REALTIME_URL ?? process.env.NEXT_PUBLIC_API_ORIGIN
       ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:4000' : undefined);
-    const socket = io(localSocket, { transports: ['websocket'] });
+    const socket = io(localSocket, { transports: ['websocket'], withCredentials: true });
     let timer: ReturnType<typeof setTimeout> | undefined;
     socket.on('feed:changed', () => {
       if (timer) return;
