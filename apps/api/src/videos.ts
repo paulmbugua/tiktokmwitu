@@ -14,17 +14,23 @@ import {
 import { removeVideo, saveVideo } from './media';
 import type { MediaStorage } from './media-storage';
 
-const videoFields = z.object({ caption: cleanText(500), county: cleanText(40) });
+const videoFields = z.object({ caption: cleanText(500) });
 const textBody = z.object({ body: cleanText(500) });
 const enabledBody = z.object({ enabled: z.boolean() });
 const clientCursor = z.object({ at: z.iso.datetime(), id: z.uuid() });
 const projection = `
-  v.id,v.caption,v.county,v.created_at,u.handle,u.display_name,u.id AS creator_id,
+  v.id,v.caption,v.created_at,u.handle,u.display_name,u.id AS creator_id,
   (SELECT count(*)::int FROM likes l WHERE l.video_id=v.id) AS likes,
   (SELECT count(*)::int FROM comments c WHERE c.video_id=v.id) AS comments,
   EXISTS(SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=$1) AS liked,
   EXISTS(SELECT 1 FROM follows f WHERE f.creator_id=u.id AND f.follower_id=$1) AS following,
-  to_char(v.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at`;
+  EXISTS(SELECT 1 FROM saved_videos s WHERE s.video_id=v.id AND s.user_id=$1) AS saved`;
+const cursorAt = (column: 'v.created_at' | 's.saved_at') =>
+  `to_char(${column} AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at`;
+function feedPage(rows: { id: string; cursor_at: string }[]) {
+  const last = rows[11];
+  return { items: rows.slice(0, 12), next: rows.length > 12 ? { at: last.cursor_at, after: last.id } : null };
+}
 
 export async function assertVideo(id: string) {
   if (!(await db.query('SELECT 1 FROM videos WHERE id=$1', [id])).rowCount) {
@@ -46,16 +52,28 @@ export class VideosController {
     }), query);
     if (Boolean(input.at) !== Boolean(input.after)) throw new BadRequestException('Invalid feed cursor.');
     const { rows } = await db.query(`
-      SELECT ${projection} FROM videos v JOIN users u ON u.id=v.user_id
+      SELECT ${projection}, ${cursorAt('v.created_at')} FROM videos v JOIN users u ON u.id=v.user_id
       WHERE (NOT $2::boolean OR EXISTS (
         SELECT 1 FROM follows f WHERE f.creator_id=u.id AND f.follower_id=$1))
-      AND ($3::text IS NULL OR strpos(lower(v.caption || ' ' || v.county || ' ' || u.handle || ' ' || u.display_name),lower($3)) > 0)
+      AND ($3::text IS NULL OR strpos(lower(v.caption || ' ' || u.handle || ' ' || u.display_name),lower($3)) > 0)
       AND ($4::text IS NULL OR u.handle=$4)
       AND ($5::timestamptz IS NULL OR (v.created_at,v.id)<($5,$6::uuid))
       ORDER BY v.created_at DESC,v.id DESC LIMIT 13`,
       [user?.id ?? null, input.following === 'true', input.q || null, input.creator ?? null, input.at ?? null, input.after ?? null]);
-    const last = rows[11];
-    return { items: rows.slice(0, 12), next: rows.length > 12 ? { at: last.cursor_at, after: last.id } : null };
+    return feedPage(rows);
+  }
+
+  @Get('videos/saved')
+  async saved(@Req() req: Request, @Query() query: Record<string, unknown>) {
+    const user = await requireUser(req);
+    const input = parse(z.object({ at: clientCursor.shape.at.optional(), after: clientCursor.shape.id.optional() }), query);
+    if (Boolean(input.at) !== Boolean(input.after)) throw new BadRequestException('Invalid saved videos cursor.');
+    const { rows } = await db.query(`
+      SELECT ${projection}, ${cursorAt('s.saved_at')}
+      FROM saved_videos s JOIN videos v ON v.id=s.video_id JOIN users u ON u.id=v.user_id
+      WHERE s.user_id=$1 AND ($2::timestamptz IS NULL OR (s.saved_at,s.video_id)<($2,$3::uuid))
+      ORDER BY s.saved_at DESC,s.video_id DESC LIMIT 13`, [user.id, input.at ?? null, input.after ?? null]);
+    return feedPage(rows);
   }
 
   @Get('videos/:id')
@@ -76,12 +94,12 @@ export class VideosController {
     @Req() req: Request, @Body() body: unknown, @UploadedFile() file?: { buffer: Buffer },
   ) {
     const user = await requireUser(req);
-    const { caption, county } = parse(videoFields, body);
+    const { caption } = parse(videoFields, body);
     if (!file?.buffer.length) throw new BadRequestException('Choose a video.');
     const { id: mediaId, storage } = await saveVideo(file.buffer);
     try {
-      await db.query('INSERT INTO videos(id,user_id,caption,county,media_storage) VALUES ($1,$2,$3,$4,$5)',
-        [mediaId, user.id, caption, county, storage]);
+      await db.query('INSERT INTO videos(id,user_id,caption,media_storage) VALUES ($1,$2,$3,$4)',
+        [mediaId, user.id, caption, storage]);
     } catch (error) {
       await removeVideo(mediaId, storage).catch(() => undefined);
       throw error;
@@ -123,6 +141,22 @@ export class VideosController {
       SELECT c.id,c.body,c.created_at,u.handle
       FROM comments c JOIN users u ON u.id=c.user_id
       WHERE c.video_id=$1 ORDER BY c.created_at DESC,c.id DESC LIMIT 100`, [uuid(raw)])).rows;
+  }
+
+  @Put('videos/:id/save')
+  async save(@Req() req: Request, @Param('id') raw: string, @Body() body: unknown) {
+    const user = await requireUser(req);
+    const id = uuid(raw);
+    const { enabled } = parse(enabledBody, body);
+    if (enabled) {
+      const result = await db.query(`
+        INSERT INTO saved_videos(user_id,video_id) SELECT $1,id FROM videos WHERE id=$2 FOR KEY SHARE
+        ON CONFLICT DO NOTHING RETURNING video_id`, [user.id, id]);
+      if (!result.rowCount) await assertVideo(id);
+    } else {
+      await db.query('DELETE FROM saved_videos WHERE user_id=$1 AND video_id=$2', [user.id, id]);
+    }
+    return { ok: true };
   }
 
   @Post('videos/:id/comments')

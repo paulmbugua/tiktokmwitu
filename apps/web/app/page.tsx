@@ -2,7 +2,7 @@
 'use client';
 
 import {
-  ArrowDown, ArrowDownToLine, ArrowUp, ChevronRight, Clapperboard, Compass,
+  ArrowDown, ArrowDownToLine, ArrowUp, Bookmark, Check, ChevronRight, Clapperboard, Compass,
   Flag, Heart, House, Inbox as InboxIcon, MapPin, MessageCircle, Plus, Radio, Search,
   Send, Share2, Trash2, UploadCloud, UserRound, UsersRound, Volume2, VolumeX, X,
 } from 'lucide-react';
@@ -10,20 +10,16 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { io } from 'socket.io-client';
 import dynamic from 'next/dynamic';
 import SignupNameFields from './signup-name-fields';
-import { api, mediaUrl, send, useData, type Comment, type Feed, type Inbox, type Message, type Person, type Profile, type Video } from './client';
+import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Profile, type Video } from './client';
 
 type Tab = 'For You' | 'Following' | 'Discover';
 type Panel =
-  | { kind: 'upload' | 'inbox' | 'account' }
+  | { kind: 'upload' | 'inbox' | 'account' | 'saved' }
   | { kind: 'auth'; liveCode?: string }
   | { kind: 'live'; code?: string; resume?: boolean }
   | { kind: 'comments' | 'report'; video: Video }
   | { kind: 'profile' | 'chat'; handle: string };
 
-const counties = [
-  'Nairobi', 'Mombasa', 'Kisumu', 'Nakuru', 'Uasin Gishu', 'Kiambu', 'Kajiado',
-  'Machakos', 'Kilifi', 'Nyeri', 'Kakamega', 'Meru', 'Other county',
-];
 const num = new Intl.NumberFormat('en-KE', { notation: 'compact' });
 const Live = dynamic(() => import('./live'), { ssr: false });
 
@@ -52,8 +48,27 @@ function Action({ icon, label, onClick, active = false, count }: {
   </button>;
 }
 
-function Clip({ video, root, muted, onMute, children, profile }: {
-  video: Video; root: HTMLElement | null; muted: boolean; onMute: () => void; children: ReactNode; profile: () => void;
+function SavedVideos({ show }: { show: (id: string) => void }) {
+  const [pages, setPages] = useState<Cursor[]>([]);
+  const cursor = pages.at(-1);
+  const saved = useData<Feed>('/videos/saved' + (cursor ? '?' + new URLSearchParams(cursor) : ''));
+  const next = saved?.data?.next;
+  return <>
+    <div className="list">
+      {saved?.data?.items.map(video => <button className="row item" key={video.id} onClick={() => show(video.id)}>
+        <Bookmark size={20} /><div><strong>{video.caption}</strong><p>@{video.handle}</p></div><ChevronRight size={18} />
+      </button>)}
+      <p className="hint">{saved?.error ?? (!saved ? 'Loading saved videos…' : !saved.data?.items.length ? 'No saved videos on this page.' : '')}</p>
+    </div>
+    {(pages.length > 0 || next) && <div className="profile-actions">
+      {pages.length > 0 && <button className="secondary" onClick={() => setPages(current => current.slice(0, -1))}>Previous</button>}
+      {next && <button className="secondary" onClick={() => setPages(current => [...current, next])}>Next</button>}
+    </div>}
+  </>;
+}
+
+function Clip({ video, root, muted, onMute, children, profile, manage }: {
+  video: Video; root: HTMLElement | null; muted: boolean; onMute: () => void; children: ReactNode; profile: () => void; manage: ReactNode;
 }) {
   const section = useRef<HTMLElement>(null);
   const player = useRef<HTMLVideoElement>(null);
@@ -71,26 +86,30 @@ function Clip({ video, root, muted, onMute, children, profile }: {
     return () => { observer.disconnect(); media.pause(); };
   }, [root]);
   return <article className="clip" ref={section} data-clip={video.id}>
-    <div className="stage">
-      <video ref={player} src={mediaUrl(video.id)} loop muted={muted} playsInline preload="none"
-        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => setFailed(true)} />
-      <button className="play-area" aria-label={playing ? 'Pause video' : 'Play video'} onClick={() => {
-        const media = player.current;
-        if (media?.paused) void media.play().catch(() => setFailed(true));
-        else media?.pause();
-      }}>{failed ? 'Video unavailable' : !playing && <span>▶</span>}</button>
-      <div className="clip-top">
-        <span><MapPin size={14} /> {video.county}</span>
-        <button aria-label={muted ? 'Unmute' : 'Mute'} className="icon" onClick={onMute}>
-          {muted ? <VolumeX size={19} /> : <Volume2 size={19} />}
-        </button>
+    <div className="clip-frame">
+      <div className="stage">
+        <video ref={player} src={mediaUrl(video.id)} loop muted={muted} playsInline preload="none"
+          onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => setFailed(true)} />
+        <button className="play-area" aria-label={playing ? 'Pause video' : 'Play video'} onClick={() => {
+          const media = player.current;
+          if (media?.paused) void media.play().catch(() => setFailed(true));
+          else media?.pause();
+        }}>{failed ? 'Video unavailable' : !playing && <span>▶</span>}</button>
+        <div className="clip-top">
+          <button aria-label={muted ? 'Unmute' : 'Mute'} className="icon" onClick={onMute}>
+            {muted ? <VolumeX size={19} /> : <Volume2 size={19} />}
+          </button>
+        </div>
+        <div className="actions" role="group" aria-label="Video actions">{children}</div>
       </div>
       <div className="clip-info">
-        <button onClick={profile}><Avatar name={video.display_name} /><span>{video.display_name} <small>@{video.handle}</small></span></button>
-        <p>{video.caption}</p>
+        <div className="clip-byline">
+          <button onClick={profile}><Avatar name={video.display_name} /><span>{video.display_name} <small>@{video.handle}</small></span></button>
+          {manage}
+        </div>
+        {video.caption && <p>{video.caption}</p>}
       </div>
     </div>
-    <div className="actions">{children}</div>
   </article>;
 }
 
@@ -210,13 +229,14 @@ export default function Home() {
     finally { setMutation(false); }
   }
 
-  async function change(path: string, method: string, body?: object) {
+  async function change(path: string, method: string, body?: object, update?: (video: Video) => Video) {
     if (!user) { open({ kind: 'auth' }); return; }
     if (mutation) return;
     setMutation(true);
     try {
       await send(path, method, body);
       if (method === 'DELETE') { clearLink(); setExtra(null); }
+      if (update) setExtra(old => old && { ...old, items: old.items.map(update) });
       refresh();
     } catch (error) { setFeedback((error as Error).message); }
     finally { setMutation(false); }
@@ -267,8 +287,17 @@ export default function Home() {
   }
 
   async function share(id: string) {
+    const url = new URL('?v=' + id, location.origin).href;
     try {
-      await navigator.clipboard.writeText(new URL('?v=' + id, location.origin).href);
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: 'Watch on Tiktok mwitu', url });
+        return;
+      }
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
       setFeedback('Video link copied.');
     } catch { setFeedback('Copy the video URL from your address bar.'); showVideo(id); }
   }
@@ -297,7 +326,7 @@ export default function Home() {
     auth: mode === 'register' ? 'Join Tiktok mwitu' : 'Welcome back',
     upload: 'Post a video', comments: 'Comments', profile: 'Creator profile',
     inbox: 'Inbox', chat: panel && 'handle' in panel ? '@' + panel.handle : 'Chat',
-    report: 'Report video', account: 'Your account', live: 'Live broadcasts',
+    report: 'Report video', account: 'Your account', live: 'Live broadcasts', saved: 'Saved videos',
   };
   const feedError = shared ? linked?.error : feed?.error;
   const ready = shared ? !!linked : !!feed;
@@ -337,7 +366,7 @@ export default function Home() {
         event.preventDefault(); setExtra(null); setQuery(search.trim()); root?.scrollTo(0, 0);
       }}>
         <Search size={20} />
-        <input aria-label="Search videos" placeholder="Search creators, captions or counties" value={search} onChange={event => setSearch(event.target.value)} maxLength={80} />
+        <input aria-label="Search videos" placeholder="Search creators or captions" value={search} onChange={event => setSearch(event.target.value)} maxLength={80} />
         <button className="secondary">Search</button>
       </form>}
       <div className="content">
@@ -348,24 +377,31 @@ export default function Home() {
           }
         }}>
           {clips.map(video => <Clip key={video.id} video={video} root={root} muted={muted} onMute={() => setMuted(!muted)}
-            profile={() => open({ kind: 'profile', handle: video.handle })}>
-            {user?.id !== video.creator_id && <Action icon={<Plus size={22} />} label={video.following ? 'Following' : 'Follow'}
-              active={video.following} onClick={() => change('/creators/' + video.handle + '/follow', 'PUT', { enabled: !video.following })} />}
-            <Action icon={<Heart size={22} fill={video.liked ? 'currentColor' : 'none'} />} label={video.liked ? 'Unlike' : 'Like'}
-              count={video.likes} active={video.liked} onClick={() => change('/videos/' + video.id + '/like', 'PUT', { enabled: !video.liked })} />
-            <Action icon={<MessageCircle size={22} />} label="Comments" count={video.comments} onClick={() => open({ kind: 'comments', video })} />
-            <Action icon={<Share2 size={21} />} label="Share" onClick={() => void share(video.id)} />
-            {user?.id === video.creator_id
-              ? <Action icon={<Trash2 size={19} />} label="Delete" onClick={() => {
+            profile={() => open({ kind: 'profile', handle: video.handle })}
+            manage={user?.id === video.creator_id
+              ? <button className="icon" aria-label="Delete video" onClick={() => {
                 if (confirm('Permanently delete this video?')) void change('/videos/' + video.id, 'DELETE');
-              }} />
-              : <Action icon={<Flag size={19} />} label="Report" onClick={() => protectedPanel({ kind: 'report', video })} />}
+              }}><Trash2 size={17} /></button>
+              : <button className="icon" aria-label="Report video" onClick={() => protectedPanel({ kind: 'report', video })}><Flag size={17} /></button>}>
+            {user?.id === video.creator_id
+              ? <Action icon={<UserRound size={21} />} label="Profile" onClick={() => open({ kind: 'profile', handle: video.handle })} />
+              : <Action icon={video.following ? <Check size={21} /> : <Plus size={22} />} label={video.following ? 'Following' : 'Follow'}
+                active={video.following} onClick={() => change('/creators/' + video.handle + '/follow', 'PUT', { enabled: !video.following },
+                  item => item.creator_id === video.creator_id ? { ...item, following: !video.following } : item)} />}
+            <Action icon={<Heart size={22} fill={video.liked ? 'currentColor' : 'none'} />} label={video.liked ? 'Unlike' : 'Like'}
+              count={video.likes} active={video.liked} onClick={() => change('/videos/' + video.id + '/like', 'PUT', { enabled: !video.liked },
+                item => item.id === video.id ? { ...item, liked: !video.liked, likes: Math.max(0, item.likes + (video.liked ? -1 : 1)) } : item)} />
+            <Action icon={<MessageCircle size={22} />} label="Comments" count={video.comments} onClick={() => open({ kind: 'comments', video })} />
+            <Action icon={<Bookmark size={21} fill={video.saved ? 'currentColor' : 'none'} />} label={video.saved ? 'Saved' : 'Save'}
+              active={video.saved} onClick={() => change('/videos/' + video.id + '/save', 'PUT', { enabled: !video.saved },
+                item => item.id === video.id ? { ...item, saved: !video.saved } : item)} />
+            <Action icon={<Share2 size={21} />} label="Share" onClick={() => void share(video.id)} />
           </Clip>)}
           {!clips.length && <div className="empty">
             <div className="empty-art" aria-hidden="true"><div className="art-inner"><Clapperboard size={52} strokeWidth={1.5} /></div></div>
             <div>
               <h1>{feedError ? 'Feed unavailable' : !ready ? 'Loading videos…' : tab === 'Following' ? 'Your following feed' : query ? 'No matching videos' : 'What’s happening mtaani?'}</h1>
-              <p>{feedError ?? (!ready ? '' : tab === 'Following' ? 'Follow Kenyan creators to see their latest posts here.' : query ? 'Try a different creator, caption or county.' : 'Share a short video from your corner of Kenya.')}</p>
+              <p>{feedError ?? (!ready ? '' : tab === 'Following' ? 'Follow Kenyan creators to see their latest posts here.' : query ? 'Try a different creator or caption.' : 'Share a short video from your corner of Kenya.')}</p>
               {feedError ? <button className="secondary" onClick={refresh}>Try again</button> : ready && (tab === 'Following'
                 ? <button className="secondary" onClick={() => choose('For You')}>Browse For You</button>
                 : !query && <button className="primary" onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={19} /> Post a video</button>)}
@@ -410,16 +446,18 @@ export default function Home() {
         </button>
       </form>}
       {panel.kind === 'upload' && <form onSubmit={submit}>
-        <label className="drop"><UploadCloud size={28} />{fileName || 'Choose a video'}<small>MP4, MOV or WebM · 48 MB · First 60 seconds</small>
-          <input type="file" name="video" accept=".mp4,.mov,.webm,video/mp4,video/webm,video/quicktime" required onChange={event => {
+        <label className="drop">
+          <input className="upload-input" aria-label="Choose a Video." type="file" name="video" accept=".mp4,.mov,.webm,video/mp4,video/webm,video/quicktime" required onChange={event => {
             const file = event.target.files?.[0];
             event.target.setCustomValidity(file && file.size > 48 * 1024 * 1024 ? 'Choose a video under 48 MB.' : '');
             setFileName(file?.name ?? '');
           }} />
+          <span className="upload-picker"><UploadCloud size={24} /> Choose a Video.</span>
+          {fileName && <span className="upload-file">{fileName}</span>}
+          <small>MP4, MOV or WebM · 48 MB · First 60 seconds</small>
         </label>
         <label>Caption<textarea name="caption" maxLength={500} required placeholder="What should people know?" /></label>
-        <label>County<select name="county" required>{counties.map(county => <option key={county}>{county}</option>)}</select></label>
-        <button className="primary" disabled={pending}>{pending ? 'Uploading and processing…' : 'Publish video'}</button>
+        <button className="secondary" disabled={pending}>{pending ? 'Uploading and processing…' : 'Publish video'}</button>
       </form>}
       {panel.kind === 'comments' && <>
         <div className="list">
@@ -472,7 +510,9 @@ export default function Home() {
           <button className="primary" onClick={() => open({ kind: 'profile', handle: user.handle })}>View profile</button>
           <button className="secondary" onClick={() => void logout()}>Log out</button>
         </div>
+        <button className="secondary" onClick={() => open({ kind: 'saved' })}><Bookmark size={17} /> Saved videos</button>
       </div>}
+      {panel.kind === 'saved' && user && <SavedVideos show={showVideo} />}
       {dialogError && <p className="error" role="alert">{dialogError}</p>}
     </Dialog>}
     {feedback && <div className="toast" role="status">{feedback}</div>}

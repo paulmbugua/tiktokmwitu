@@ -6,8 +6,8 @@ import { useEffect, useState } from 'react';
 export type Person = { id: string; handle: string; display_name: string };
 export type Profile = Person & { followers: number; following_count: number; following: boolean };
 export type Video = {
-  id: string; caption: string; county: string; handle: string; creator_id: string;
-  display_name: string; likes: number; comments: number; liked: boolean; following: boolean;
+  id: string; caption: string; handle: string; creator_id: string;
+  display_name: string; likes: number; comments: number; liked: boolean; following: boolean; saved: boolean;
 };
 export type Cursor = { at: string; after: string };
 export type Feed = { items: Video[]; next: Cursor | null };

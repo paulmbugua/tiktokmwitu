@@ -17,10 +17,11 @@ CREATE TABLE IF NOT EXISTS videos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
   caption varchar(500) NOT NULL,
-  county varchar(40) NOT NULL,
+  county varchar(40) NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS videos_feed ON videos(created_at DESC, id DESC);
+ALTER TABLE videos ALTER COLUMN county SET DEFAULT '';
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS media_storage text NOT NULL DEFAULT 'local'
   CHECK (media_storage IN ('local','r2'));
 CREATE TABLE IF NOT EXISTS video_media_cleanup (
@@ -40,6 +41,13 @@ CREATE TABLE IF NOT EXISTS likes (
   user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
   PRIMARY KEY(video_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS saved_videos (
+  user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
+  video_id uuid NOT NULL REFERENCES videos ON DELETE CASCADE,
+  saved_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(user_id, video_id)
+);
+CREATE INDEX IF NOT EXISTS saved_videos_recent ON saved_videos(user_id, saved_at DESC, video_id DESC);
 CREATE TABLE IF NOT EXISTS comments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   video_id uuid NOT NULL REFERENCES videos ON DELETE CASCADE,

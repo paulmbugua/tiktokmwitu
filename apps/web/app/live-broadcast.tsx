@@ -42,11 +42,11 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const [pending, setPending] = useState(false);
   const [revision, setRevision] = useState(0);
   const [drawer, setDrawer] = useState<keyof typeof drawerTitles | null>(null);
-  const [fit, setFit] = useState(false);
+  const [fit, setFit] = useState(true);
   const [hideChat, setHideChat] = useState(false);
   const [localVideo, setLocalVideo] = useState<LocalVideoTrack | null>(null);
   const [look, setLook] = useState<CameraLook>(cameraLooks[0]);
-  const [strength, setStrength] = useState(75);
+  const [strength, setStrength] = useState(55);
   const [effectPending, setEffectPending] = useState(false);
   const [effectError, setEffectError] = useState('');
   const [shareNotice, setShareNotice] = useState('');
@@ -134,7 +134,16 @@ export default function Broadcast({ grant, user, signIn, leave }: {
     const guest = guestVideo.current;
     const audio = audioBox.current;
     if (!host || !guest || !audio) return;
-    const room = new Room({ adaptiveStream: true, dynacast: true, videoCaptureDefaults: { resolution: VideoPresets.h540.resolution } });
+    const portraitPhone = window.matchMedia('(pointer: coarse) and (orientation: portrait)').matches;
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      videoCaptureDefaults: {
+        facingMode: 'user',
+        frameRate: { ideal: 24, max: 30 },
+        resolution: portraitPhone ? { width: 540, height: 960, aspectRatio: 9 / 16 } : VideoPresets.h540.resolution,
+      },
+    });
     connection.current = room;
     let open = true;
     let requested = false;
@@ -151,7 +160,11 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       if (publication.source !== Track.Source.Camera || !publication.track) return;
       const element = publication.track.attach();
       element.muted = true;
-      if (element instanceof HTMLVideoElement) element.playsInline = true;
+      if (element instanceof HTMLVideoElement) {
+        element.playsInline = true;
+        const facing = publication.track.mediaStreamTrack.getSettings().facingMode;
+        if (!facing || facing === 'user') element.classList.add('self-preview');
+      }
       container(person.identity).append(element);
       if (publication.track instanceof LocalVideoTrack) setLocalVideo(publication.track);
     });
@@ -442,10 +455,11 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       {drawer === 'effects' && isPublisher && <>
         <p className="hint">{camera && localVideo ? 'Changes your camera for everyone watching.' : 'Turn on your camera to use effects.'}</p>
         <div className="arena-looks" aria-label="Camera presets">
-          {cameraLooks.map(preset => <button className="arena-look" key={preset.id} type="button" aria-pressed={look.id === preset.id}
+          {cameraLooks.map((preset, index) => <button className="arena-look" key={preset.id} type="button" aria-pressed={look.id === preset.id}
+            title={preset.description}
             disabled={!localVideo || !camera || pending || effectPending || !connected} onClick={() => void applyLook(preset)}>
-            <span aria-hidden="true" style={{ background: 'linear-gradient(145deg,' + preset.colors.join(',') + ')' }} />
-            <strong>{preset.name}</strong><small>{preset.description}</small>
+            <span aria-hidden="true" style={{ backgroundPosition: (index * 25) + '% center' }} />
+            <strong>{preset.name}</strong>
           </button>)}
         </div>
         {look.id !== 'off' && <div className="arena-strength">

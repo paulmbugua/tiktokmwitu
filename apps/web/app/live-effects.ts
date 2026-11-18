@@ -1,11 +1,11 @@
 import type { Track, TrackProcessor, VideoProcessorOptions } from 'livekit-client';
 
 export const cameraLooks = [
-  { id: 'off', name: 'Original', description: 'Unfiltered camera', colors: ['#33403d', '#71897c'], values: [0, 0, 0, 0] },
-  { id: 'soft', name: 'Soft Focus', description: 'Softens fine detail', colors: ['#66546b', '#e6afbb'], values: [.07, .015, .02, .73] },
-  { id: 'daylight', name: 'Window Light', description: 'Lifts shadows', colors: ['#425964', '#ffe8c9'], values: [.21, .018, -.04, .21] },
-  { id: 'golden', name: 'Golden Hour', description: 'Warm, soft light', colors: ['#86492f', '#ffcb73'], values: [.09, .12, .08, .24] },
-  { id: 'studio', name: 'Studio', description: 'Adds contrast and color', colors: ['#293a51', '#9e91df'], values: [.04, -.016, .19, .27] },
+  { id: 'off', name: 'Original', description: 'Unfiltered camera', values: [0, 0, 0, 0] },
+  { id: 'soft', name: 'Soft Focus', description: 'Softens fine detail', values: [.07, .015, .02, .6] },
+  { id: 'daylight', name: 'Window Light', description: 'Lifts shadows', values: [.21, .018, -.04, .21] },
+  { id: 'golden', name: 'Golden Hour', description: 'Warm, soft light', values: [.09, .12, .08, .24] },
+  { id: 'studio', name: 'Studio', description: 'Adds contrast and color', values: [.04, -.016, .19, .27] },
 ] as const;
 
 export type CameraLook = (typeof cameraLooks)[number];
