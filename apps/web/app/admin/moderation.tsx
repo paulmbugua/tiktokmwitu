@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { mediaUrl, send, useData, type Person } from '../client';
 
 type Report = { id: string; caption: string; handle: string; total: number; reasons: string[] };
+type LiveReport = { id: string; handle: string; ended_at: string | null; total: number; reasons: string[] };
 
 export default function Moderation() {
   const [version, setVersion] = useState(0);
@@ -12,6 +13,7 @@ export default function Moderation() {
   const [notice, setNotice] = useState('');
   const session = useData<Person>('/admin/me', version);
   const reports = useData<Report[]>(session?.data ? '/admin/reports' : null, version);
+  const live = useData<LiveReport[]>(session?.data ? '/admin/live-reports' : null, version);
 
   function refresh() {
     setVersion(value => value + 1);
@@ -73,6 +75,26 @@ export default function Moderation() {
               if (!window.confirm('Remove this video from Tiktok mwitu?')) return;
               void act(() => send('/admin/reports/' + report.id, 'POST', { action: 'remove' }), 'Video removed.');
             }}>Remove video</button>
+        </div>
+      </article>)}
+    </section>}
+    {session?.data && <section aria-labelledby="live-reports-heading">
+      <header><h2 id="live-reports-heading">LIVE reports</h2><button className="secondary" onClick={refresh}>Refresh LIVE reports</button></header>
+      {live?.error && <p className="error">{live.error}</p>}
+      {!live && <p role="status">Loading LIVE reports…</p>}
+      {live?.data?.length === 0 && <p role="status">No pending LIVE reports.</p>}
+      {live?.data?.map(report => <article className="moderation-report" key={report.id}>
+        <div><h3>@{report.handle}</h3><p className="hint">{report.total} reports · {report.ended_at ? 'Ended' : 'Active'}</p>
+          <ul>{report.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>
+        </div>
+        <div className="moderation-actions">
+          <button className="secondary" disabled={pending} onClick={() =>
+            void act(() => send('/admin/live-reports/' + report.id, 'POST', { action: 'dismiss' }), 'LIVE reports dismissed.')}>Dismiss LIVE reports</button>
+          {!report.ended_at && <button className="secondary danger" disabled={pending} onClick={() => {
+            if (window.confirm('End this LIVE broadcast for everyone?')) {
+              void act(() => send('/admin/live-reports/' + report.id, 'POST', { action: 'end' }), 'Broadcast ended.');
+            }
+          }}>End LIVE</button>}
         </div>
       </article>)}
     </section>}

@@ -16,7 +16,9 @@ import { allowedOrigins, connectRealtime, cookie, db, digest, identity, mediaDir
 import { AdminController } from './admin';
 import { schema } from './schema';
 import { SocialController } from './social';
-import { LiveController } from './live';
+import { LiveController, reconcileLive } from './live';
+import { LiveModerationController } from './live-moderation';
+import { liveSchema } from './live-store';
 import { VideosController } from './videos';
 
 @Controller()
@@ -38,7 +40,7 @@ class HealthController {
       return req.ip ?? req.socket.remoteAddress ?? 'unknown';
     },
   })],
-  controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, AdminController],
+  controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, LiveModerationController, AdminController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 class AppModule {}
@@ -47,7 +49,7 @@ async function start() {
   if (!process.env.DATABASE_URL && !process.env.PGHOST) throw new Error('Set DATABASE_URL or PGHOST before starting the API.');
   const publicMedia = join(mediaDir, 'public');
   await mkdir(publicMedia, { recursive: true });
-  await db.query(schema);
+  await db.query(schema + liveSchema);
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
   app.use(helmet());
@@ -120,6 +122,8 @@ async function start() {
     void db.query('DELETE FROM sessions WHERE expires_at <= now()').catch(error => console.error('Session cleanup failed', error));
   }, 3600000);
   expiry.unref();
+  const liveSweep = setInterval(() => void reconcileLive(), 4000);
+  liveSweep.unref();
   await app.listen(Number(process.env.API_PORT ?? 4000), process.env.API_HOST ?? '127.0.0.1');
 }
 

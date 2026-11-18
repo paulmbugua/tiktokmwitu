@@ -3,6 +3,8 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { adminOrigin, db, parse, publishFeed, requireUser, uuid } from './infra';
 import { removeVideo } from './media';
+import { finishRoom } from './live';
+import { lockedRoom } from './live-store';
 
 const moderators = new Set((process.env.ADMIN_USER_IDS ?? '').split(',').map(id => id.trim().toLowerCase()).filter(Boolean));
 
@@ -21,6 +23,41 @@ export class AdminController {
   @Get('me')
   async me(@Req() req: Request) {
     return requireAdmin(req);
+  }
+
+  @Get('live-reports')
+  async liveReports(@Req() req: Request) {
+    await requireAdmin(req);
+    const { rows } = await db.query(`
+      SELECT r.id,r.ended_at,u.handle,queue.total,queue.reasons
+      FROM live_rooms r JOIN users u ON u.id=r.host_id
+      JOIN LATERAL (
+        SELECT count(*)::int AS total,max(updated_at) AS most_recent,
+          (SELECT array_agg(reason) FROM (
+            SELECT reason FROM live_reports WHERE room_id=r.id ORDER BY updated_at DESC LIMIT 5
+          ) latest) AS reasons
+        FROM live_reports WHERE room_id=r.id
+      ) queue ON queue.total>0
+      ORDER BY queue.most_recent DESC,r.id LIMIT 50`);
+    return rows;
+  }
+
+  @Post('live-reports/:id')
+  async reviewLive(@Req() req: Request, @Param('id') raw: string, @Body() body: unknown) {
+    const actor = await requireAdmin(req);
+    const id = uuid(raw);
+    const { action } = parse(z.object({ action: z.enum(['dismiss', 'end']) }), body);
+    if (action === 'end') {
+      await finishRoom(id, 'moderated', actor);
+    } else {
+      await lockedRoom(id, async client => {
+        const { rowCount } = await client.query('DELETE FROM live_reports WHERE room_id=$1', [id]);
+        if (!rowCount) throw new NotFoundException('This room has no pending reports.');
+        await client.query(`INSERT INTO live_audit(room_id,actor_id,action,details)
+          VALUES ($1,$2,'platformDismiss',jsonb_build_object('count',$3::int))`, [id, actor.id, rowCount]);
+      });
+    }
+    return { ok: true };
   }
 
   @Get('reports')
