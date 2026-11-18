@@ -95,6 +95,9 @@ textarea{min-height:82px;resize:vertical}
 .live-media video{display:block;max-height:37vh;width:100%;object-fit:contain}
 .live-chat{max-height:15vh;margin-top:8px;overflow-wrap:anywhere}
 .arena{display:grid;gap:10px}
+.live-handoff{background:#1a241b;border:1px solid #3b5136;border-radius:12px;padding:12px;display:grid;gap:8px}
+.live-handoff label{font-size:13px;color:var(--muted)}
+.live-handoff input[readonly]{color:var(--text);user-select:all}
 .arena:has(.split) .arena-tile video{object-fit:cover}
 dialog:has(.arena){width:min(760px,calc(100% - 20px))}
 .arena .live-status{margin:0;gap:8px}

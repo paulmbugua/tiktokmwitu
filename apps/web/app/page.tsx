@@ -13,7 +13,9 @@ import { api, mediaUrl, send, useData, type Comment, type Feed, type Inbox, type
 
 type Tab = 'For You' | 'Following' | 'Discover';
 type Panel =
-  | { kind: 'auth' | 'upload' | 'inbox' | 'account' | 'live' }
+  | { kind: 'upload' | 'inbox' | 'account' }
+  | { kind: 'auth'; liveCode?: string }
+  | { kind: 'live'; code?: string; resume?: boolean }
   | { kind: 'comments' | 'report'; video: Video }
   | { kind: 'profile' | 'chat'; handle: string };
 
@@ -116,8 +118,11 @@ export default function Home() {
   const refresh = () => setFeedRev(value => value + 1);
   const refreshInbox = () => setInboxRev(value => value + 1);
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get('v');
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('v');
     if (id && /^[a-f0-9-]{36}$/i.test(id)) setShared(id);
+    const liveCode = params.get('live');
+    if (liveCode) setPanel({ kind: 'live', code: liveCode.slice(0, 32) });
     api<{ user: Person | null }>('/auth/me').then(result => setUser(result.user)).catch(() => undefined);
   }, []);
 
@@ -229,7 +234,7 @@ export default function Home() {
           const person = await send<Person>('/auth/' + mode, 'POST', Object.fromEntries(data));
           setUser(person);
           setExtra(null);
-          setPanel(null);
+          setPanel(panel.liveCode ? { kind: 'live', code: panel.liveCode, resume: true } : null);
           refresh();
           break;
         }
@@ -381,9 +386,20 @@ export default function Home() {
       </nav>
     </main>
 
-    {panel && <Dialog key={panel.kind} title={titles[panel.kind]} close={() => { if (!pending) setPanel(null); }}>
-      {panel.kind === 'live' && <Live user={user} signIn={() => open({ kind: 'auth' })} />}
+    {panel && <Dialog key={panel.kind} title={titles[panel.kind]} close={() => {
+      if (pending) return;
+      if (panel.kind === 'auth' && panel.liveCode) { open({ kind: 'live', code: panel.liveCode }); return; }
+      if (panel.kind === 'live') {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('live');
+        window.history.replaceState(null, '', url);
+      }
+      setPanel(null);
+    }}>
+      {panel.kind === 'live' && <Live user={user} initialCode={panel.code} resume={panel.resume}
+        signIn={liveCode => open({ kind: 'auth', liveCode })} />}
       {panel.kind === 'auth' && <form onSubmit={submit}>
+        {panel.liveCode && <p className="hint">After signing in, you’ll return to the LIVE.</p>}
         {mode === 'register' && <label>Display name<input name="display_name" autoComplete="nickname" maxLength={48} required /></label>}
         <label>Handle<input name="handle" autoComplete="username" pattern="[A-Za-z0-9_]{3,24}" maxLength={24} required /></label>
         <label>Password<input name="password" type="password" minLength={10} maxLength={128} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required /></label>

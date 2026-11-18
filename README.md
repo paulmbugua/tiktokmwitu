@@ -71,3 +71,9 @@ Sign in as the host, select Live, allow camera and microphone, then sign in from
 Use separate signed-in browser profiles for the host, challenger, and viewers. The challenger first joins the host’s broadcast as a viewer. The host invites their handle, and the challenger accepts and shares their camera. The match shows both feeds, counts down from five seconds, then runs for three minutes. Each connected viewer gets one free vote. The API records scores, a winner or draw, and forfeits. A creator can start another match from the same broadcast.
 
 Open **Moderation** inside a broadcast to appoint room moderators, turn viewer chat on or off, filter keywords, pin or remove messages, apply or lift chat timeouts, ban or unban participants, and review reports and the action log. Host reports go directly to platform moderators. The admin dashboard can review LIVE reports and end a broadcast. Rules and roles apply to that broadcast. Chat history and actions are stored in PostgreSQL.
+
+### Bring an audience to Tiktok mwitu
+
+Start a LIVE on Tiktok mwitu and open **Share LIVE**. Share the link wherever your audience can open it, or show the 12-character code and tell viewers to enter it in Tiktok mwitu’s LIVE menu. The link opens the exact broadcast, and sign-in or signup returns viewers directly to it after they choose to join. The link and code stop working when the broadcast ends.
+
+For a 1v1 handoff, reserve the challenger’s seat using their Tiktok mwitu handle before sharing. The reservation lasts five minutes. The invited account can accept and enable its camera on arrival. Everyone else joins as a viewer. TikTok LIVE participants, chat, scores, gifts and stream state aren’t transferred.

@@ -1,12 +1,12 @@
 'use client';
 
-import { Camera, CameraOff, Heart, Mic, MicOff, Send, Shield, Swords } from 'lucide-react';
+import { Camera, CameraOff, Heart, Mic, MicOff, Send, Share2, Shield, Swords } from 'lucide-react';
 import { Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { send, useData, type Person } from './client';
 import LiveModeration from './live-controls';
 
-export type Grant = { id: string; url: string; token: string; host: boolean; hostId: string };
+export type Grant = { id: string; url: string; token: string; host: boolean; hostId: string; shareCode: string };
 export type ChatLine = { id: string; user_id: string; handle: string; body: string };
 type Match = {
   id: string; guest_id: string; guest_name: string;
@@ -36,6 +36,8 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
   const [pending, setPending] = useState(false);
   const [revision, setRevision] = useState(0);
   const [showMod, setShowMod] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [shareNotice, setShareNotice] = useState('');
   const [reporting, setReporting] = useState<{ id: string; label: string }>();
   const [camera, setCamera] = useState(true);
   const [mic, setMic] = useState(true);
@@ -52,6 +54,21 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
   const canModerate = state?.self.role === 'host' || state?.self.role === 'moderator';
   const chatAllowed = canModerate || (state?.room.chat_open && (!state.self.mutedUntil || new Date(state.self.mutedUntil).getTime() <= clock));
   const sync = () => setRevision(value => value + 1);
+  const shareUrl = () => new URL('/?live=' + grant.shareCode, window.location.origin).href;
+
+  async function shareRoom(action: 'link' | 'code' | 'share') {
+    setShareNotice('');
+    try {
+      if (action === 'share') {
+        await navigator.share({ title: 'Join this LIVE on Tiktok mwitu', text: 'LIVE code: ' + grant.shareCode, url: shareUrl() });
+      } else {
+        await navigator.clipboard.writeText(action === 'code' ? grant.shareCode : shareUrl());
+        setShareNotice(action === 'code' ? 'LIVE code copied.' : 'Share link copied.');
+      }
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') setShareNotice('Select and copy the link or code above.');
+    }
+  }
 
   useEffect(() => {
     if (!connected) return;
@@ -236,10 +253,25 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
     <div className="live-status">
       <span role="status">{state?.room.ended ? 'Broadcast ended.' : status}</span>
       <div className="arena-buttons">
+        {connected && grant.shareCode && <button className="secondary" onClick={() => setShowShare(value => !value)} aria-expanded={showShare}>
+          <Share2 size={16} /> Share LIVE
+        </button>}
         {canModerate && <button className="secondary" onClick={() => setShowMod(value => !value)} aria-expanded={showMod}><Shield size={16} /> Moderation</button>}
         <button className="secondary" disabled={pending} onClick={exit}>{grant.host ? 'End broadcast' : 'Leave'}</button>
       </div>
     </div>
+    {connected && showShare && grant.shareCode && <section className="live-handoff" aria-label="Share this LIVE">
+      <h3>Invite people to this LIVE</h3>
+      <p className="hint">Share the link or tell viewers to enter this code in Tiktok mwitu.</p>
+      <label>LIVE code<input readOnly value={grant.shareCode} onFocus={event => event.target.select()} /></label>
+      <label>Share link<input readOnly value={shareUrl()} onFocus={event => event.target.select()} /></label>
+      <div className="arena-buttons">
+        <button className="secondary" onClick={() => void shareRoom('link')}>Copy link</button>
+        <button className="secondary" onClick={() => void shareRoom('code')}>Copy code</button>
+        {typeof navigator.share === 'function' && <button className="primary" onClick={() => void shareRoom('share')}>Share link</button>}
+      </div>
+      {shareNotice && <p role="status">{shareNotice}</p>}
+    </section>}
     <div className={'arena-media' + (split ? ' split' : '')}>
       <div className="arena-tile"><div ref={hostVideo} /><span>Host</span></div>
       <div className="arena-tile" hidden={!split}><div ref={guestVideo} /><span>{match?.guest_name}</span></div>
@@ -274,10 +306,10 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
         <strong>{match.host_score} – {match.guest_score}</strong></div>
       {match.outcome !== 'time' && <small>Match ended early.</small>}
     </section>}
-    {match && ['invited','ready'].includes(match.status) &&
+    {match && ['invited','ready'].includes(match.status) && (match.status === 'ready' || grant.host || match.guest_id === user.id) &&
       <div className="battle">
         <p>{match.status === 'ready' ? 'Waiting for the challenger to publish video…' :
-          match.guest_id === user.id ? 'The host invited you to a 1v1 LIVE battle.' : 'Challenge sent to ' + match.guest_name + '.'}</p>
+          match.guest_id === user.id ? 'The host invited you to a 1v1 LIVE battle.' : 'Seat reserved for ' + match.guest_name + '. Share the LIVE link or code so they can join.'}</p>
         <div className="arena-buttons">
           {connected && match.guest_id === user.id && match.status === 'invited' && <>
             <button className="primary" disabled={pending} onClick={() => void matchAction('accept')}>Accept challenge</button>
@@ -294,7 +326,7 @@ export default function Broadcast({ grant, user, leave }: { grant: Grant; user: 
         const handle = String(new FormData(form).get('handle')).trim().replace(/^@/, '');
         void matchAction('invite', { handle });
       }}>
-        <input name="handle" aria-label="Challenger handle" required maxLength={25} placeholder="@handle watching your LIVE" />
+        <input name="handle" aria-label="Challenger handle" required maxLength={25} placeholder="Challenger’s @handle on Tiktok mwitu" />
         <button className="primary" disabled={pending}><Swords size={17} /> Invite to 1v1</button>
       </form>}
     {pinned && <p className="pinned"><strong>Pinned · @{pinned.handle}</strong> {pinned.body}</p>}

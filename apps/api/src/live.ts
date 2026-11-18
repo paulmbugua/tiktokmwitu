@@ -50,7 +50,7 @@ async function grant(room: LiveRoom, user: Person) {
   const host = room.host_id === user.id;
   const token = new AccessToken(key, secret, { identity: user.id, name: user.display_name, ttl: '30s' });
   token.addGrant({ roomJoin: true, room: roomName(room.id), ...publishPermission(host) });
-  return { url, token: await token.toJwt(), host, id: room.id, hostId: room.host_id };
+  return { url, token: await token.toJwt(), host, id: room.id, hostId: room.host_id, shareCode: room.share_code };
 }
 
 export async function finishRoom(id: string, outcome: string, moderator?: Person) {
@@ -154,6 +154,22 @@ export class LiveController {
       ON CONFLICT(host_id) WHERE ended_at IS NULL DO NOTHING RETURNING *`, [user.id]);
     if (!room) throw new ConflictException('You already have an active LIVE. Reopen it from the LIVE list.');
     return grant(room, user);
+  }
+
+  @Get('handoff/:code')
+  @Throttle({ default: { ttl: 60000, limit: 30 } })
+  async handoff(@Param('code') raw: string) {
+    liveService();
+    const code = parse(z.string().trim().toUpperCase().regex(/^[0-9A-F]{12}$/, 'Enter the 12-character LIVE code.'), raw);
+    const { rows: [match] } = await db.query<{ id: string; host_id: string; handle: string; display_name: string }>(`
+      SELECT r.id,r.host_id,u.handle,u.display_name FROM live_rooms r JOIN users u ON u.id=r.host_id
+      WHERE r.share_code=$1 AND r.online_at IS NOT NULL AND r.ended_at IS NULL`, [code]);
+    if (!match) throw new NotFoundException('This LIVE code is invalid or the broadcast has ended.');
+    const [room] = await liveService().listRooms([roomName(match.id)]);
+    if (!room) throw new NotFoundException('This LIVE is no longer available.');
+    const participants = await liveService().listParticipants(room.name);
+    if (!participants.some(person => person.identity === match.host_id)) throw new NotFoundException('This LIVE is no longer available.');
+    return { id: match.id, handle: match.handle, display_name: match.display_name };
   }
 
   @Post(':id/join')
@@ -261,10 +277,10 @@ export class LiveController {
         if (!host) throw new ForbiddenException('Only the host can invite a challenger.');
         if (match) throw new ConflictException('Finish the current invite or match first.');
         const { rows: [guest] } = await client.query<Person>('SELECT id,handle,display_name FROM users WHERE handle=$1', [command.handle]);
-        if (!guest || guest.id === user.id) throw new NotFoundException('Choose another creator watching your room.');
+        if (!guest || guest.id === user.id) throw new NotFoundException('Choose another Tiktok mwitu account.');
         await member(client, room, guest);
-        await connectedUser(id, guest.id);
-        await client.query("INSERT INTO live_matches(room_id,guest_id,status) VALUES ($1,$2,'invited')", [id, guest.id]);
+        await client.query(`INSERT INTO live_matches(room_id,guest_id,status,expires_at)
+          VALUES ($1,$2,'invited',clock_timestamp()+interval '5 minutes')`, [id, guest.id]);
         return { ok: true };
       }
 
