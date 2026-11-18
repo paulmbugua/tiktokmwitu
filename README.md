@@ -56,6 +56,7 @@ docker compose exec db psql -U mwitu -d mwitu -c "SELECT id,handle FROM users WH
 Add the verified ID to `ADMIN_USER_IDS` in the VPS `.env`. Separate multiple IDs with commas and rerun the tunnel Compose command to apply the change. That account can log in at `https://admin.tiktokmwitu.co.ke`, inspect reported videos, dismiss reports, or remove a video. Decisions are recorded in `moderation_actions`. Leaving the allowlist empty disables moderator access. For native development, visit `http://localhost:3000/admin` with a local account ID allowlisted.
 
 Back up PostgreSQL and the media volume together. Keep one API replica with this configuration because the upload encoder and socket rooms are process-local.
+The tunnel deployment reserves 1 GiB of free VPS space when accepting new video uploads. Set `MWITU_PRIVATE_SUBNET` to an unused subnet if the app's private bridge conflicts with another network.
 
 ## Enable live broadcasts
 

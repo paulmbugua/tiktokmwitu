@@ -8,12 +8,17 @@ services:
     environment:
       TRUST_PROXY_HOPS: 0
       TRUST_CLOUDFLARE_TUNNEL: "true"
+      MEDIA_FREE_RESERVE_BYTES: ${MEDIA_FREE_RESERVE_BYTES:-1073741824}
   web:
     profiles: ["local-edge"]
   edge:
     profiles: ["local-edge"]
 
 networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${MWITU_PRIVATE_SUBNET:-10.253.74.0/28}
   rivera_tunnel:
     external: true
     name: ${RIVERA_TUNNEL_NETWORK:-rivera_edge}

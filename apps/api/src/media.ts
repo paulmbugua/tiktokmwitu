@@ -1,13 +1,14 @@
 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdir, writeFile, rm, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { mediaDir } from './infra';
 
 const ffmpeg = promisify(execFile);
+const diskReserve = Number(process.env.MEDIA_FREE_RESERVE_BYTES ?? 0);
 let encoding = false;
 
 export async function saveVideo(upload: Buffer) {
@@ -17,6 +18,12 @@ export async function saveVideo(upload: Buffer) {
   const incoming = join(mediaDir, 'incoming', id);
   const output = join(mediaDir, 'public', id + '.mp4');
   try {
+    if (diskReserve > 0) {
+      const disk = await statfs(mediaDir);
+      if (disk.bavail * disk.bsize < diskReserve + upload.length + 32 * 1024 * 1024) {
+        throw new ServiceUnavailableException('Video storage is temporarily full.');
+      }
+    }
     await mkdir(join(mediaDir, 'incoming'), { recursive: true });
     await mkdir(join(mediaDir, 'public'), { recursive: true });
     await writeFile(incoming, upload, { flag: 'wx' });
@@ -36,6 +43,7 @@ export async function saveVideo(upload: Buffer) {
     return id;
   } catch (error) {
     await rm(output, { force: true }).catch(() => undefined);
+    if (error instanceof ServiceUnavailableException) throw error;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new ServiceUnavailableException('Video encoder unavailable.');
     }
