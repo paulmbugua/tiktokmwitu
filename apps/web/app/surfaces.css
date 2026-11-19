@@ -43,8 +43,8 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   border-color: var(--line-soft);
   background: #191420d9;
 }
-.brand { margin: 0 0 15px 4px; font-size: clamp(17px, 1.5vw, 23px); letter-spacing: -.055em; }
-.sidebar .mwitu-wordmark { font-size: clamp(1.44rem, 2.1vw, 1.75rem); }
+.brand { margin: 0 0 15px; gap: 7px; }
+.sidebar .mwitu-wordmark { font-size: clamp(1.36rem, 2.1vw, 1.75rem); }
 .brand-icon, .mobile-brand { border: 1px solid #d3fc7738; flex: none; }
 .sidebar nav button, .sidebar .account { min-height: 48px; border-radius: 15px; }
 .sidebar nav button:hover, .sidebar .account:hover { background: var(--surface); }
