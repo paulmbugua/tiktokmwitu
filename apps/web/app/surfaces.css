@@ -417,7 +417,7 @@ dialog:has(.arena) { background: #100c17; }
   .sidebar button { justify-content: center; }
   .sidebar .post { justify-content: center; }
   .sidebar button > span:not(.brand-icon, .avatar) { display: none; }
-  .brand { margin: 0 0 12px; }
+  .sidebar .brand { display: none; }
   .sidebar .account { padding: 6px; }
   .content { grid-template-columns: minmax(0, 1fr) 58px; }
 }
