@@ -72,7 +72,7 @@ export const mpesaPhoneDigest = (phone: string) => createHmac('sha256', MPESA_PA
 export async function startMpesa(payment: Topup, phone: string) {
   const token = await mpesaAccess();
   const { status, body } = await request<{ ResponseCode?: string; CheckoutRequestID?: string }>(
-    daraja + '/mpesa/stkpush/v1/process', 'Bearer ' + token, {
+    daraja + '/mpesa/stkpush/v1/processrequest', 'Bearer ' + token, {
       ...mpesaCredentials(), TransactionType: MPESA_TRANSACTION_TYPE || 'CustomerPayBillOnline',
       Amount: payment.amount_kes, PartyA: phone, PartyB: MPESA_SHORTCODE, PhoneNumber: phone,
       CallBackURL: new URL('/api/gifts/webhooks/mpesa/' + payment.id + '/' + callbackProof(payment.id), PAYMENT_API_ORIGIN).href,
