@@ -1,6 +1,7 @@
 
 import type { Metadata, Viewport } from 'next';
 import './style.css';
+import './surfaces.css';
 
 export const metadata: Metadata = {
   title: 'Tiktok mwitu',
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, title: 'Tiktok mwitu', statusBarStyle: 'black' },
 };
 
-export const viewport: Viewport = { themeColor: '#0d1010', viewportFit: 'cover', interactiveWidget: 'resizes-content' };
+export const viewport: Viewport = { themeColor: '#15121b', viewportFit: 'cover', interactiveWidget: 'resizes-content' };
 
 export default function Layout({ children }: Readonly<{ children: React.ReactNode }>) {
   return <html lang="en-KE"><body>{children}</body></html>;

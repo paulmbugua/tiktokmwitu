@@ -33,10 +33,10 @@ function Avatar({ name }: { name: string }) {
   return <span className="avatar" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>;
 }
 
-function Dialog({ title, close, children }: { title: string; close: () => void; children: ReactNode }) {
+function Dialog({ title, kind, close, children }: { title: string; kind: Panel['kind']; close: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { ref.current?.showModal(); }, []);
-  return <dialog ref={ref} aria-label={title} onCancel={event => { event.preventDefault(); close(); }} onClick={event => {
+  return <dialog ref={ref} data-panel={kind} aria-label={title} onCancel={event => { event.preventDefault(); close(); }} onClick={event => {
     if (event.target === ref.current) close();
   }}>
     <section className="dialog-inner">
@@ -443,7 +443,7 @@ export default function Home() {
                 item => item.id === video.id ? { ...item, saved: !video.saved } : item)} />
           </Clip>)}
           {!clips.length && <div className="empty">
-            <div className="empty-art" aria-hidden="true"><div className="art-inner"><Clapperboard size={52} strokeWidth={1.5} /></div></div>
+            <div className="empty-art" aria-hidden="true"><div className="art-inner"><img src="/icons/mwitu-192.png" alt="" width="64" height="64" /></div></div>
             <div>
               <h1>{feedError ? 'Feed unavailable' : !ready ? 'Loading videos…' : tab === 'Following' ? 'Your following feed' : query ? 'No matching videos' : 'What’s happening mtaani?'}</h1>
               <p>{feedError ?? (!ready ? '' : tab === 'Following' ? 'Follow Kenyan creators to see their latest posts here.' : query ? 'Try a different creator or caption.' : 'Share a short video from your corner of Kenya.')}</p>
@@ -455,20 +455,29 @@ export default function Home() {
           {!shared && (extra ?? feed?.data)?.next && <div className="load"><button className="secondary" disabled={mutation} onClick={() => void more()}><ArrowDownToLine size={16} /> Load more</button></div>}
         </div>
         <div className="side-controls" aria-label="Browse videos">
-          <span><MapPin size={14} /> Kenya</span>
+          <aside className="discovery-rail" aria-label="Discover Mwitu">
+            <div className="discovery-live">
+              <span><MapPin size={14} /> Kenya</span>
+              <div>
+                <h2>LIVE in the mtaa</h2>
+                <button className="primary" onClick={() => open({ kind: 'live' })}><Radio size={18} /> Browse LIVE</button>
+              </div>
+            </div>
+            <button className="discovery-search" onClick={() => choose('Discover')}><Search size={18} /> Find creators and clips</button>
+          </aside>
           {!!clips.length && <div><button className="icon" aria-label="Previous video" onClick={() => step(-1)}><ArrowUp size={20} /></button>
             <button className="icon" aria-label="Next video" onClick={() => step(1)}><ArrowDown size={20} /></button></div>}
         </div>
       </div>
       <nav className="mobile-nav" aria-label="Mobile menu">
         {navigation.map(({ name, icon: Icon }) => <button key={name} className={tab === name && !shared ? 'selected' : ''} onClick={() => choose(name)}><Icon size={20} />{name}</button>)}
-        <button onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={23} />Post</button>
+        <button className="mobile-post" onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={23} />Post</button>
         <button onClick={() => protectedPanel({ kind: 'inbox' })}><InboxIcon size={20} />Inbox{unread && <i className="unread" />}</button>
         <button onClick={() => open({ kind: 'live' })}><Radio size={20} />Live</button>
       </nav>
     </main>
 
-    {panel && <Dialog key={panel.kind} title={titles[panel.kind]} close={() => {
+    {panel && <Dialog key={panel.kind} kind={panel.kind} title={titles[panel.kind]} close={() => {
       if (pending) return;
       if (panel.kind === 'auth' && panel.wallet) { open(panel.wallet); return; }
       if (panel.kind === 'auth' && panel.liveCode) { open({ kind: 'live', code: panel.liveCode }); return; }
@@ -551,16 +560,18 @@ export default function Home() {
         <label>What should we review?<textarea name="body" maxLength={500} required /></label>
         <button className="primary" disabled={pending}>Submit report</button>
       </form>}
-      {panel.kind === 'account' && user && <div className="profile">
+      {panel.kind === 'account' && user && <div className="profile account-panel">
         <Avatar name={user.display_name} /><h3>{user.display_name}</h3><p>@{user.handle}</p>
         <div className="profile-actions">
           <button className="primary" onClick={() => open({ kind: 'profile', handle: user.handle })}>View profile</button>
           <button className="secondary" onClick={() => void logout()}>Log out</button>
         </div>
-        <button className="secondary" onClick={() => open({ kind: 'saved' })}><Bookmark size={17} /> Saved videos</button>
-        <button className="secondary" onClick={() => open({ kind: 'wallet' })}><Coins size={17} /> Coin wallet</button>
-        <button className="secondary" onClick={() => open({ kind: 'invites' })}><Ticket size={17} /> LIVE invite plans</button>
-        <button className="secondary" onClick={() => open({ kind: 'promote' })}><Flame size={17} /> Promote</button>
+        <div className="account-links">
+          <button className="secondary" onClick={() => open({ kind: 'saved' })}><Bookmark size={19} /> Saved videos</button>
+          <button className="secondary" onClick={() => open({ kind: 'wallet' })}><Coins size={19} /> Coin wallet</button>
+          <button className="secondary" onClick={() => open({ kind: 'invites' })}><Ticket size={19} /> LIVE invite plans</button>
+          <button className="secondary" onClick={() => open({ kind: 'promote' })}><Flame size={19} /> Promote</button>
+        </div>
       </div>}
       {panel.kind === 'wallet' && <>
         {!sessionReady ? <p role="status">Opening your wallet…</p>

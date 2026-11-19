@@ -45,8 +45,8 @@ export default function Moderation() {
   }
 
   return <main className="moderation">
-    <header>
-      <div><p className="hint">Tiktok mwitu</p><h1>Moderation</h1></div>
+    <header className="moderation-top">
+      <div className="moderation-brand"><img src="/icons/mwitu-192.png" alt="" width="44" height="44" /><div><p className="hint">Tiktok mwitu</p><h1>Moderation</h1></div></div>
       {session?.data && <button className="secondary" disabled={pending}
         onClick={() => void act(() => send('/auth/logout', 'POST'))}>Log out @{session.data.handle}</button>}
     </header>
@@ -63,7 +63,7 @@ export default function Moderation() {
       <p>Performer share · {coins(revenue.data.performerMinor)} coins</p>
       <small>{revenue.data.gifts} gifts with commission</small>
     </section>}
-    {session?.data && <section aria-labelledby="reports-heading">
+    {session?.data && <div className="moderation-queues"><section aria-labelledby="reports-heading">
       <header><h2 id="reports-heading">Video reports</h2><button className="secondary" onClick={refresh}>Refresh</button></header>
       {reports?.error && <p className="error">{reports.error}</p>}
       {!reports && <p role="status">Loading reports…</p>}
@@ -85,8 +85,7 @@ export default function Moderation() {
             }}>Remove video</button>
         </div>
       </article>)}
-    </section>}
-    {session?.data && <section aria-labelledby="live-reports-heading">
+    </section><section aria-labelledby="live-reports-heading">
       <header><h2 id="live-reports-heading">LIVE reports</h2><button className="secondary" onClick={refresh}>Refresh LIVE reports</button></header>
       {live?.error && <p className="error">{live.error}</p>}
       {!live && <p role="status">Loading LIVE reports…</p>}
@@ -105,7 +104,7 @@ export default function Moderation() {
           }}>End LIVE</button>}
         </div>
       </article>)}
-    </section>}
+    </section></div>}
     {notice && <p className="toast" role="status">{notice}</p>}
     {error && <p className="error" role="alert">{error}</p>}
   </main>;
