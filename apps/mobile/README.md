@@ -16,7 +16,7 @@ flutter build apk --release
 
 The release uses `android/key.properties`, which is ignored by Git. Keep the private keystore and its backup outside the repository. The properties are `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. Always use the original release key for website-distributed updates. Android links for `/watch/<video-id>` and `/join/<code>` use the public signing certificate fingerprint in `apps/web/public/.well-known/assetlinks.json`.
 
-The APK is at `build/app/outputs/flutter-apk/app-release.apk`. Website distribution serves a versioned file from the private R2 bucket at `releases/tiktok-mwitu-1.0.0.apk`. The public entry point is `/download`. Upload each new signed build under its versioned key before updating the filename in the Worker.
+The APK is at `build/app/outputs/flutter-apk/app-release.apk`. Website distribution serves versioned APKs from the private R2 bucket under `releases/`. The public entry point is `/download`. Upload each new signed build under its versioned key before updating the latest filename in the Worker.
 
 ## Build iPhone
 
@@ -29,3 +29,5 @@ Review Apple’s current digital-goods payment and user-generated-content rules 
 Register Android package `ke.co.tiktokmwitu.mwitu` in Firebase under the project that owns Google sign-in. Add both signing fingerprints for the APK you distribute, enable Google in Firebase Authentication, then download a fresh `google-services.json` into `apps/mobile/android/app/`. The file is ignored by Git.
 
 Set the VPS API’s `GOOGLE_ANDROID_CLIENT_ID` to the **Web OAuth client ID** supplied by the matching Android Firebase entry as `client_type: 3`. Flutter uses that client ID as the Google token audience. Build a new signed APK with `flutter build apk --release --dart-define=MWITU_GOOGLE_ANDROID_ENABLED=true`. Build without this flag when compiling without the Firebase configuration.
+
+The mobile workflow also supports a manual Google-enabled Android build. Supply the matching JSON in the encrypted `MWITU_ANDROID_FIREBASE_RELEASE` Actions secret and turn on the `google_android` input. Sign the resulting APK with the website release key before publishing.
