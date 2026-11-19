@@ -1,4 +1,4 @@
-const pathPattern = /^\/internal\/media\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.mp4$/;
+const pathPattern = /^\/internal\/media\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(mp4|jpg)$/;
 const maxBytes = 32 * 1024 * 1024;
 const encode = new TextEncoder();
 
@@ -29,8 +29,10 @@ function readRange(value, size) {
 }
 
 export async function handleMedia(request, url, env) {
-  const id = pathPattern.exec(url.pathname)?.[1];
-  if (!id) return new Response(null, { status: 404 });
+  const match = pathPattern.exec(url.pathname);
+  if (!match) return new Response(null, { status: 404 });
+  const [, id, extension] = match;
+  const contentType = extension === 'jpg' ? 'image/jpeg' : 'video/mp4';
   const method = request.method;
   const operation = ['GET', 'HEAD'].includes(method) ? 'read' : method;
   if (!['read', 'PUT', 'DELETE'].includes(operation)) return new Response(null, { status: 405 });
@@ -38,14 +40,14 @@ export async function handleMedia(request, url, env) {
     return new Response(null, { status: 403, headers: { 'Cache-Control': 'no-store' } });
   }
 
-  const objectKey = 'videos/' + id + '.mp4';
+  const objectKey = (extension === 'jpg' ? 'thumbnails/' : 'videos/') + id + '.' + extension;
   const bucket = env.MEDIA_BUCKET;
   if (method === 'PUT') {
     const bytes = Number(request.headers.get('content-length'));
-    if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > maxBytes || !request.body) {
+    if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > (extension === 'jpg' ? 512 * 1024 : maxBytes) || !request.body) {
       return new Response(null, { status: 413 });
     }
-    await bucket.put(objectKey, request.body, { httpMetadata: { contentType: 'video/mp4' } });
+    await bucket.put(objectKey, request.body, { httpMetadata: { contentType } });
     return new Response(null, { status: 201 });
   }
   if (method === 'DELETE') {
@@ -57,7 +59,7 @@ export async function handleMedia(request, url, env) {
   const info = method === 'HEAD' || rangeHeader ? await bucket.head(objectKey) : await bucket.get(objectKey);
   if (!info) return new Response(null, { status: 404 });
   const headers = new Headers({
-    'Content-Type': 'video/mp4',
+    'Content-Type': contentType,
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'private, no-store',
     'Cross-Origin-Resource-Policy': 'same-site',
@@ -65,7 +67,7 @@ export async function handleMedia(request, url, env) {
     'ETag': info.httpEtag,
     'Content-Length': String(info.size),
   });
-  if (url.searchParams.get('download') === '1') headers.set('Content-Disposition', 'attachment; filename="mwitu-' + id + '.mp4"');
+  if (extension === 'mp4' && url.searchParams.get('download') === '1') headers.set('Content-Disposition', 'attachment; filename="mwitu-' + id + '.mp4"');
   if (method === 'HEAD') return new Response(null, { headers });
   if (!rangeHeader) return new Response(info.body, { headers });
   const range = readRange(rangeHeader, info.size);

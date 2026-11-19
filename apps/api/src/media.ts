@@ -1,17 +1,86 @@
 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, rm, stat, statfs } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rmdir, writeFile, rm, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
-import { mediaDir } from './infra';
-import { cleanCloudVideo, putCloudVideo, useR2, type MediaStorage } from './media-storage';
+import { BadRequestException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { db, mediaDir } from './infra';
+import { cleanCloudVideo, playbackUrl, putCloudThumbnail, putCloudVideo, removeCloudThumbnail, useR2, type MediaStorage } from './media-storage';
 
 const ffmpeg = promisify(execFile);
 const diskReserve = Number(process.env.MEDIA_FREE_RESERVE_BYTES ?? 0);
 let encoding = false;
 const workDir = process.env.MEDIA_WORK_DIR ?? mediaDir;
+const localThumbnail = (id: string) => join(mediaDir, 'public', id + '.jpg');
+let thumbnailQueue: Promise<unknown> = Promise.resolve();
+const pendingThumbnails = new Map<string, Promise<Buffer>>();
+
+async function generateThumbnail(id: string, storage: MediaStorage) {
+  let temporary: string | undefined;
+  try {
+    let video = join(mediaDir, 'public', id + '.mp4');
+    if (storage === 'r2') {
+      const response = await fetch(playbackUrl(id), { redirect: 'error', signal: AbortSignal.timeout(15000) });
+      const bytes = Number(response.headers.get('content-length'));
+      if (response.status === 404) throw new NotFoundException('Video unavailable.');
+      if (!response.ok || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > 32 * 1024 * 1024) {
+        await response.body?.cancel();
+        throw new ServiceUnavailableException('Video storage is unavailable.');
+      }
+      temporary = await mkdtemp(join(workDir, 'thumbnail-'));
+      video = join(temporary, 'input.mp4');
+      await writeFile(video, Buffer.from(await response.arrayBuffer()));
+    }
+    const { stdout: image } = await ffmpeg(process.env.FFMPEG_PATH ?? 'ffmpeg', [
+      '-nostdin', '-hide_banner', '-loglevel', 'error', '-protocol_whitelist', 'file',
+      '-format_whitelist', 'mov', '-threads', '1', '-i', video, '-map', '0:v:0',
+      '-filter_threads', '1', '-vf',
+      "thumbnail=24,scale=w='min(640,iw)':h='min(640,ih)':force_original_aspect_ratio=decrease,setsar=1",
+      '-frames:v', '1', '-c:v', 'mjpeg', '-threads', '1', '-q:v', '3', '-f', 'image2pipe', 'pipe:1',
+    ], { encoding: 'buffer', maxBuffer: 512 * 1024, timeout: 15000, windowsHide: true });
+    if (!image.length) throw new ServiceUnavailableException('Thumbnail unavailable.');
+    if (storage === 'r2') await putCloudThumbnail(id, image);
+    else await writeFile(localThumbnail(id), image);
+    if (!(await db.query('SELECT 1 FROM videos WHERE id=$1', [id])).rowCount) {
+      await removeThumbnail(id, storage);
+      throw new NotFoundException('Video unavailable.');
+    }
+    return image;
+  } finally {
+    if (temporary) {
+      await rm(join(temporary, 'input.mp4'), { force: true }).catch(() => undefined);
+      await rmdir(temporary).catch(() => undefined);
+    }
+  }
+}
+
+function removeThumbnail(id: string, storage: MediaStorage) {
+  if (storage === 'r2') return removeCloudThumbnail(id);
+  return rm(localThumbnail(id), { force: true });
+}
+
+export async function getVideoThumbnail(id: string, storage: MediaStorage) {
+  if (storage === 'r2') {
+    const response = await fetch(playbackUrl(id, false, true), { redirect: 'error', signal: AbortSignal.timeout(5000) });
+    if (response.ok) return Buffer.from(await response.arrayBuffer());
+    await response.body?.cancel();
+    if (response.status !== 404) throw new ServiceUnavailableException('Thumbnail storage is unavailable.');
+  } else {
+    try { return await readFile(localThumbnail(id)); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  const pending = pendingThumbnails.get(id);
+  if (pending) return pending;
+  if (pendingThumbnails.size >= 12) throw new ServiceUnavailableException('Thumbnails are currently processing.');
+  const generation = thumbnailQueue.then(() => generateThumbnail(id, storage))
+    .finally(() => pendingThumbnails.delete(id));
+  thumbnailQueue = generation.catch(() => undefined);
+  pendingThumbnails.set(id, generation);
+  return generation;
+}
 
 export async function saveVideo(upload: Buffer) {
   if (encoding) throw new ServiceUnavailableException('Another video is processing. Try again shortly.');
@@ -60,7 +129,7 @@ export async function saveVideo(upload: Buffer) {
   }
 }
 
-export function removeVideo(id: string, storage: MediaStorage) {
+export async function removeVideo(id: string, storage: MediaStorage) {
   if (storage === 'r2') return cleanCloudVideo(id);
-  return rm(join(mediaDir, 'public', id + '.mp4'), { force: true });
+  await Promise.all([rm(join(mediaDir, 'public', id + '.mp4'), { force: true }), removeThumbnail(id, storage)]);
 }

@@ -10,8 +10,8 @@ if (origin && !/^https:\/\//.test(origin)) throw new Error('R2_MEDIA_ORIGIN must
 export const useR2 = Boolean(origin);
 export type MediaStorage = 'local' | 'r2';
 
-function objectUrl(id: string) {
-  return new URL('/internal/media/' + id + '.mp4', origin);
+function objectUrl(id: string, thumbnail = false) {
+  return new URL('/internal/media/' + id + (thumbnail ? '.jpg' : '.mp4'), origin);
 }
 
 function access(operation: string, url: URL) {
@@ -21,20 +21,20 @@ function access(operation: string, url: URL) {
   return expires + '.' + signature;
 }
 
-export function playbackUrl(id: string, download = false) {
+export function playbackUrl(id: string, download = false, thumbnail = false) {
   if (!useR2) throw new ServiceUnavailableException('Cloud media storage is unavailable.');
-  const url = objectUrl(id);
+  const url = objectUrl(id, thumbnail);
   url.searchParams.set('access', access('read', url));
   if (download) url.searchParams.set('download', '1');
   return url.href;
 }
 
-async function write(id: string, method: 'PUT' | 'DELETE', body?: Buffer) {
+async function write(id: string, method: 'PUT' | 'DELETE', body?: Buffer, thumbnail = false) {
   try {
-    const url = objectUrl(id);
+    const url = objectUrl(id, thumbnail);
     const headers: Record<string, string> = { Authorization: 'Bearer ' + access(method, url) };
     if (body) {
-      headers['Content-Type'] = 'video/mp4';
+      headers['Content-Type'] = thumbnail ? 'image/jpeg' : 'video/mp4';
       headers['Content-Length'] = String(body.length);
     }
     const response = await fetch(url, { method, body: body ? new Uint8Array(body) : undefined, headers,
@@ -50,9 +50,17 @@ export async function putCloudVideo(id: string, path: string) {
   await write(id, 'PUT', await readFile(path));
 }
 
+export function putCloudThumbnail(id: string, image: Buffer) {
+  return write(id, 'PUT', image, true);
+}
+
+export function removeCloudThumbnail(id: string) {
+  return write(id, 'DELETE', undefined, true);
+}
+
 let cleaning = false;
 export async function cleanCloudVideo(id: string) {
-  await write(id, 'DELETE');
+  await Promise.all([write(id, 'DELETE'), removeCloudThumbnail(id)]);
   await db.query('DELETE FROM video_media_cleanup WHERE id=$1', [id]);
 }
 

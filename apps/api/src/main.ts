@@ -1,6 +1,6 @@
 
 import 'reflect-metadata';
-import { Controller, Get, Module } from '@nestjs/common';
+import { Controller, Get, Module, NotFoundException } from '@nestjs/common';
 import { APP_GUARD, NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -19,7 +19,8 @@ import { SocialController } from './social';
 import { LiveController, reconcileLive } from './live';
 import { LiveStageController } from './live-stage';
 import { LiveModerationController } from './live-moderation';
-import { playbackUrl, sweepCloudMedia, useR2 } from './media-storage';
+import { playbackUrl, sweepCloudMedia, useR2, type MediaStorage } from './media-storage';
+import { getVideoThumbnail } from './media';
 import { liveSchema } from './live-store';
 import { VideosController } from './videos';
 import { giftSchema } from './gift-store';
@@ -71,6 +72,7 @@ async function start() {
   app.use(cookieParser());
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Robots-Tag', 'noindex');
     if (req.method === 'POST' && /^\/gifts\/webhooks\/(card|mpesa\/[a-f0-9-]{36}\/[a-f0-9]{64})$/.test(req.path)) {
       next();
       return;
@@ -86,15 +88,26 @@ async function start() {
   app.use('/media', async (req: Request, res: Response, next: NextFunction) => {
     res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
     res.setHeader('Cache-Control', 'private, no-cache');
-    const match = /^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.mp4$/.exec(req.path);
+    const match = /^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(mp4|jpg)$/.exec(req.path);
     if (!match || !['GET', 'HEAD'].includes(req.method)) { res.sendStatus(404); return; }
     try {
-      const video = await db.query<{ media_storage: string }>('SELECT media_storage FROM videos WHERE id=$1', [match[1]]);
+      const [ , id, extension] = match;
+      const video = await db.query<{ media_storage: MediaStorage }>('SELECT media_storage FROM videos WHERE id=$1', [id]);
       if (!video.rowCount) { res.sendStatus(404); return; }
+      if (extension === 'jpg') {
+        try {
+          const thumbnail = await getVideoThumbnail(id, video.rows[0].media_storage);
+          res.type('jpg').send(thumbnail);
+        } catch (error) {
+          if (error instanceof NotFoundException) res.sendStatus(404);
+          else res.set('Retry-After', '15').sendStatus(503);
+        }
+        return;
+      }
       const download = req.query.download === '1';
       if (video.rows[0].media_storage === 'r2') {
         res.setHeader('Cache-Control', 'private, no-store');
-        res.redirect(307, playbackUrl(match[1], download));
+        res.redirect(307, playbackUrl(id, download));
         return;
       }
       if (download) res.setHeader('Content-Disposition', 'attachment; filename="mwitu-' + match[1] + '.mp4"');

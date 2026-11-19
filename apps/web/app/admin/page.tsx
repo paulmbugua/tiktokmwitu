@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import Moderation from './moderation';
 
 export const metadata: Metadata = {
-  title: 'Moderation | Tiktok mwitu',
+  title: 'Moderation | TikTok Mwitu',
+  description: 'TikTok Mwitu moderation dashboard.',
   robots: { index: false, follow: false },
 };
 

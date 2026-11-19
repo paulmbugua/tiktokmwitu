@@ -4,8 +4,9 @@ import './style.css';
 import './surfaces.css';
 
 export const metadata: Metadata = {
-  title: 'Tiktok mwitu',
-  description: 'Short videos from Kenyan creators. Watch, post and find your people.',
+  metadataBase: new URL('https://tiktokmwitu.co.ke'),
+  title: 'TikTok Mwitu | Kenyan Short Videos & LIVE Streams',
+  description: 'Discover short videos from Kenyan creators, watch LIVE streams and join the conversation on TikTok Mwitu. Share your own clips from anywhere in Kenya.',
   manifest: '/manifest.webmanifest',
   icons: {
     icon: [
@@ -14,7 +15,7 @@ export const metadata: Metadata = {
     ],
     apple: { url: '/icons/apple-touch-icon.png', sizes: '180x180' },
   },
-  appleWebApp: { capable: true, title: 'Tiktok mwitu', statusBarStyle: 'black' },
+  appleWebApp: { capable: true, title: 'TikTok Mwitu', statusBarStyle: 'black' },
 };
 
 export const viewport: Viewport = { themeColor: '#15121b', viewportFit: 'cover', interactiveWidget: 'resizes-content' };

@@ -18,6 +18,7 @@ const videoFields = z.object({ caption: cleanText(500) });
 const textBody = z.object({ body: cleanText(500) });
 const enabledBody = z.object({ enabled: z.boolean() });
 const clientCursor = z.object({ at: z.iso.datetime(), id: z.uuid() });
+const sitemapPageSize = 1000;
 const projection = `
   v.id,v.caption,v.created_at,u.handle,u.display_name,u.id AS creator_id,
   (SELECT count(*)::int FROM likes l WHERE l.video_id=v.id) AS likes,
@@ -40,6 +41,20 @@ export async function assertVideo(id: string) {
 
 @Controller()
 export class VideosController {
+  @Get('discovery/video-sitemap')
+  async videoSitemap(@Query('page') raw?: string) {
+    if (raw === undefined) {
+      const { rows: [result] } = await db.query<{ pages: number }>(
+        'SELECT ceil(count(*)::numeric / $1)::int AS pages FROM videos', [sitemapPageSize]);
+      return { pages: Math.max(1, result.pages) };
+    }
+    const page = parse(z.coerce.number().int().min(1).max(50000), raw);
+    const { rows } = await db.query(
+      'SELECT id,caption,created_at FROM videos ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2',
+      [sitemapPageSize, (page - 1) * sitemapPageSize]);
+    return { items: rows };
+  }
+
   @Get('videos')
   async feed(@Req() req: Request, @Query() query: Record<string, unknown>) {
     const user = await identity(req.cookies[cookie]);

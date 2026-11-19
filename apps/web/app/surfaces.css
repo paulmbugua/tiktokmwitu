@@ -421,3 +421,5 @@ dialog:has(.arena) { background: #100c17; }
   *, *::before, *::after { transition: none !important; }
   dialog:not(:has(.arena)) { animation: none; }
 }
+.catalog-link { color: var(--lavender, #dbc7ff); font-size: .875rem; }
+.catalog-link:hover { color: #d3fc77; }
