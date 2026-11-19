@@ -4,6 +4,8 @@ import { handleMedia } from './media.mjs';
 const publicHost = 'tiktokmwitu.co.ke';
 const adminHost = 'admin.tiktokmwitu.co.ke';
 const apiHost = 'https://api.tiktokmwitu.co.ke';
+const androidFile = 'tiktok-mwitu-1.0.0.apk';
+const liveInvitePath = /^\/join\/(\d{6}|[0-9A-F]{16})\/?$/i;
 const mediaPath = /^\/media\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.(mp4|jpg)$/;
 
 function noIndex(response) {
@@ -38,6 +40,29 @@ export default {
     const publicSite = url.hostname === publicHost;
     const adminSite = url.hostname === adminHost;
     const retrieval = request.method === 'GET' || request.method === 'HEAD';
+    if (publicSite && retrieval) {
+      const invite = liveInvitePath.exec(url.pathname);
+      if (invite) return noIndex(Response.redirect(new URL('/?live=' + invite[1], url), 302));
+      if (url.pathname === '/download/android') {
+        return Response.redirect(new URL('/download/' + androidFile, url), 302);
+      }
+      if (url.pathname === '/download/' + androidFile) {
+        const key = 'releases/' + androidFile;
+        const object = request.method === 'HEAD' ? await env.MEDIA_BUCKET.head(key) : await env.MEDIA_BUCKET.get(key);
+        if (!object) return new Response('This release is temporarily unavailable.', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+        return new Response(request.method === 'HEAD' ? null : object.body, { headers: {
+          'Content-Type': 'application/vnd.android.package-archive',
+          'Content-Length': String(object.size),
+          'Content-Disposition': 'attachment; filename="' + androidFile + '"',
+          'Cache-Control': 'public, max-age=86400, immutable',
+          'ETag': object.httpEtag,
+          'X-Content-Type-Options': 'nosniff',
+        } });
+      }
+      if (url.pathname === '/download') {
+        return env.ASSETS.fetch(new Request(new URL('/download.html', url), request));
+      }
+    }
     if (url.pathname.startsWith('/internal/media/')) {
       return publicSite ? handleMedia(request, url, env) : new Response(null, { status: 404 });
     }

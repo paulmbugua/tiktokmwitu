@@ -21,6 +21,7 @@ export default function InstallApp({ interrupted }: { interrupted: boolean }) {
   const [snoozed, setSnoozed] = useState(false);
 
   useEffect(() => {
+    if (navigator.userAgent.includes('MwituFlutter/')) return;
     const mode = window.matchMedia('(display-mode: standalone)');
     const appleNavigator = navigator as Navigator & { standalone?: boolean };
     function updateMode() {

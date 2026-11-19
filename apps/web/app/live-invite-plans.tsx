@@ -37,7 +37,8 @@ export default function LiveInvitePlans({ roomId }: {roomId?:string}) {
           <p className="hint">{pass.claimed?'Claimed':'Ready to share'}</p></div>
         <div className="arena-buttons">
           {(['code','link'] as const).map(action=><button className="secondary" key={action} onClick={async()=>{
-            const value=action==='code'?pass.code:new URL('/?live='+pass.code,location.origin).href;
+            const value=action==='code'?pass.code:new URL(
+              location.hostname === 'tiktokmwitu.co.ke' ? '/join/' + pass.code : '/?live=' + pass.code, location.origin).href;
             try{await navigator.clipboard.writeText(value);setMessage(action==='code'?'Invite code copied.':'Invite link copied.');}
             catch{setMessage(value);}
           }}>{action==='code'?'Copy code':'Copy link'}</button>)}

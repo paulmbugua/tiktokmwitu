@@ -155,7 +155,7 @@ async function sitemap(head, path) {
   if (!number || Number(number) > 50000) return failure(head);
   const { items } = await api('/discovery/video-sitemap?page=' + number);
   if (number !== '1' && !items.length) return failure(head);
-  const urls = number === '1' ? ['/', '/videos', '/live'].map(route => '<url><loc>' + origin + route + '</loc></url>') : [];
+  const urls = number === '1' ? ['/', '/videos', '/live', '/download'].map(route => '<url><loc>' + origin + route + '</loc></url>') : [];
   for (const clip of items) {
     const name = escape(excerpt(clip.caption, 100) || 'Short video on TikTok Mwitu');
     const description = escape(excerpt(clip.caption, 1000) || 'Watch this short video on TikTok Mwitu.');

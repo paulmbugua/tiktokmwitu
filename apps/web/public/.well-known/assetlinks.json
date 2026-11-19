@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "ke.co.tiktokmwitu.mwitu",
+      "sha256_cert_fingerprints": ["4D:BF:F5:D1:E8:03:DE:FB:97:0E:51:AA:4C:AC:D5:AA:99:32:D7:AB:77:16:C6:A6:6A:89:E6:F0:28:E3:9F:7C"]
+    }
+  }
+]

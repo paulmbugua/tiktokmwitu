@@ -18,9 +18,10 @@ import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, typ
 
 type Tab = 'For You' | 'Following' | 'Discover';
 type WalletPanel = { kind: 'wallet'; purchaseId?: string; liveCode?: string; liveRoom?:string };
+type AccountDestination = 'upload' | 'inbox' | 'account';
 type Panel =
   | { kind: 'upload' | 'inbox' | 'account' | 'saved' | 'invites' }
-  | { kind: 'auth'; liveCode?: string; wallet?: WalletPanel }
+  | { kind: 'auth'; liveCode?: string; wallet?: WalletPanel; destination?: AccountDestination }
   | WalletPanel
   | { kind: 'live'; code?: string; resume?: boolean; roomId?:string }
   | { kind: 'promote'; videoId?:string }
@@ -156,18 +157,33 @@ export default function Home() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('v');
-    if (id && /^[a-f0-9-]{36}$/i.test(id)) setShared(id);
-    if (params.get('browse') === 'videos') setTab('Discover');
+    const videoId = id && /^[a-f0-9-]{36}$/i.test(id) ? id : undefined;
+    if (videoId) setShared(videoId);
+    const destination = params.get('browse');
+    if (destination === 'videos') setTab('Discover');
     const liveCode = params.get('live');
     const topup = params.get('topup');
     const liveRoom=params.get('room')??'';
     if (topup && /^[a-f0-9-]{36}$/i.test(topup)) {
       setPanel({ kind: 'wallet', purchaseId: topup, liveCode: liveCode && /^(?:\d{6}|[a-f0-9]{16})$/i.test(liveCode) ? liveCode : undefined,
         liveRoom:/^[a-f0-9-]{36}$/i.test(liveRoom)?liveRoom:undefined });
-    } else if (liveCode || params.get('browse') === 'live') {
+    } else if (liveCode || destination === 'live') {
       setPanel({ kind: 'live', code: liveCode?.slice(0, 32) });
     }
-    api<{ user: Person | null }>('/auth/me').then(result => setUser(result.user)).catch(() => undefined).finally(() => setSessionReady(true));
+    if (!topup && !liveCode && videoId && params.get('action') === 'comments') {
+      api<Video>('/videos/' + videoId).then(video => {
+        setPanel(current => current ?? { kind: 'comments', video });
+      }).catch(() => undefined);
+    }
+    api<{ user: Person | null }>('/auth/me').then(result => {
+      setUser(result.user);
+      if (!topup && !liveCode && !videoId) {
+        const target = destination === 'post' ? 'upload' : destination;
+        if (target === 'upload' || target === 'inbox' || target === 'account') {
+          setPanel(current => current ?? (result.user ? { kind: target } : { kind: 'auth', destination: target }));
+        }
+      }
+    }).catch(() => undefined).finally(() => setSessionReady(true));
   }, []);
 
   useEffect(() => {
@@ -291,7 +307,8 @@ export default function Home() {
           const person = await send<Person>('/auth/' + mode, 'POST', Object.fromEntries(data));
           setUser(person);
           setExtra(null);
-          setPanel(panel.wallet ?? (panel.liveCode ? { kind: 'live', code: panel.liveCode, resume: true } : null));
+          setPanel(panel.wallet ?? (panel.liveCode ? { kind: 'live', code: panel.liveCode, resume: true }
+            : panel.destination ? { kind: panel.destination } : null));
           refresh();
           break;
         }
@@ -385,6 +402,7 @@ export default function Home() {
         <button aria-label="Live broadcasts" onClick={() => open({ kind: 'live' })}><Radio size={21} /><span>Live</span></button>
       </nav>
         <a className="catalog-link" href="/videos">Browse Kenyan videos</a>
+        <a className="catalog-link" href="/download">Get the Android app</a>
       <button className="primary post" aria-label="Post a video" onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={22} /> <span>Post a video</span></button>
       <button className="account" aria-label={user ? 'Your account' : 'Log in / Sign up'} onClick={() => open({ kind: user ? 'account' : 'auth' })}>
         {user ? <Avatar name={user.display_name} /> : <UserRound size={19} />} <span>{user ? '@' + user.handle : 'Log in / Sign up'}</span>
