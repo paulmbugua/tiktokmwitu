@@ -5,6 +5,11 @@ import { useEffect, useRef, useState } from 'react';
 
 type InstallEvent = Event & { prompt: () => Promise<{ outcome: 'accepted' | 'dismissed' }> };
 const snoozeKey = 'mwitu.install.snooze';
+const installedKey = 'mwitu.install.completed';
+
+function rememberInstallation() {
+  try { localStorage.setItem(installedKey, '1'); } catch { /* Storage can be disabled. */ }
+}
 
 export default function InstallApp({ interrupted }: { interrupted: boolean }) {
   const promptEvent = useRef<InstallEvent | null>(null);
@@ -18,21 +23,32 @@ export default function InstallApp({ interrupted }: { interrupted: boolean }) {
   useEffect(() => {
     const mode = window.matchMedia('(display-mode: standalone)');
     const appleNavigator = navigator as Navigator & { standalone?: boolean };
-    const updateMode = () => setAvailable(!mode.matches && !appleNavigator.standalone && window.isSecureContext);
+    function updateMode() {
+      const standalone = mode.matches || appleNavigator.standalone;
+      if (standalone) rememberInstallation();
+      let installed = false;
+      try { installed = localStorage.getItem(installedKey) === '1'; } catch { /* Storage can be disabled. */ }
+      setAvailable(!standalone && !installed && window.isSecureContext);
+    }
     const onPrompt = (event: Event) => {
       event.preventDefault();
       promptEvent.current = event as InstallEvent;
       setCanPrompt(true);
     };
     const onInstalled = () => {
+      rememberInstallation();
       promptEvent.current = null;
       setCanPrompt(false);
       setAvailable(false);
       setOffer(false);
       setHelp(false);
     };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === installedKey && event.newValue === '1') setAvailable(false);
+    };
     window.addEventListener('beforeinstallprompt', onPrompt);
     window.addEventListener('appinstalled', onInstalled);
+    window.addEventListener('storage', onStorage);
     mode.addEventListener('change', updateMode);
     updateMode();
     setAppleMobile(/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
@@ -43,13 +59,14 @@ export default function InstallApp({ interrupted }: { interrupted: boolean }) {
     return () => {
       window.removeEventListener('beforeinstallprompt', onPrompt);
       window.removeEventListener('appinstalled', onInstalled);
+      window.removeEventListener('storage', onStorage);
       mode.removeEventListener('change', updateMode);
     };
   }, []);
 
   useEffect(() => {
-    if (interrupted || !available || snoozed || offer || help) return;
-    const timer = window.setTimeout(() => setOffer(true), canPrompt ? 750 : 12000);
+    if (interrupted || !available || !canPrompt || snoozed || offer || help) return;
+    const timer = window.setTimeout(() => setOffer(true), 750);
     return () => window.clearTimeout(timer);
   }, [available, canPrompt, help, interrupted, offer, snoozed]);
 
@@ -68,7 +85,10 @@ export default function InstallApp({ interrupted }: { interrupted: boolean }) {
     setOffer(false);
     setHelp(false);
     try {
-      if ((await request.prompt()).outcome === 'accepted') setAvailable(false);
+      if ((await request.prompt()).outcome === 'accepted') {
+        rememberInstallation();
+        setAvailable(false);
+      }
       else dismiss();
     } catch {
       setHelp(true);

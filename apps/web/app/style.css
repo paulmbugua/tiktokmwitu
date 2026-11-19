@@ -73,12 +73,11 @@ h1,h2,h3,p{margin:0}
 .clip-byline>button:first-child{display:flex;align-items:center;gap:8px;font-weight:800;text-align:left;min-width:0;overflow-wrap:anywhere}
 .clip-info small{display:block;color:#dadfdb}
 .clip-info p{white-space:pre-wrap;overflow-wrap:anywhere;max-height:min(5em,18cqh);overflow:auto;margin-top:5px}
-.actions{position:absolute;z-index:2;right:6px;bottom:7px;display:grid;gap:5px;justify-items:end;padding:4px;text-shadow:0 1px 3px #000}
-.action{display:grid;justify-items:center;gap:2px;width:60px;color:var(--text);text-decoration:none}
+.actions{position:absolute;z-index:2;right:9px;bottom:10px;display:grid;gap:8px;padding:3px}
+.action{display:grid;place-items:center;color:var(--text);text-decoration:none}
 .action:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:8px}
 .action span{display:grid;place-items:center;background:#101913ee;border:1px solid #ffffff65;width:43px;height:43px;border-radius:50%}
 .action:hover span,.action.active span{color:var(--accent);border-color:#647747}
-.action small{font-size:10px;line-height:1.2;white-space:nowrap;background:#101913e0;border-radius:5px;padding:1px 4px}
 .clip-utilities{display:flex;gap:4px;flex:none}
 .clip-utilities>.icon{width:34px;height:34px;color:var(--muted)}
 .load{display:grid;place-items:center;padding:14px;scroll-snap-align:end}
@@ -337,13 +336,11 @@ dialog:has(.arena){inset:0;margin:0;border:0;border-radius:0;width:100%;max-widt
 @media(max-height:600px){
   .actions{gap:3px}
   .action span{width:34px;height:34px}
-  .action small{line-height:1.1}
 }
 @media(max-height:475px){
   .clip-top{right:auto;left:8px}
   .actions{gap:2px;padding:0;bottom:4px}
   .action span{width:28px;height:28px}
   .action span svg{width:16px;height:16px}
-  .action small{display:none}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important}}

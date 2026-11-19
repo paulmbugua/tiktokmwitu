@@ -27,7 +27,6 @@ type Panel =
   | { kind: 'comments' | 'report'; video: Video }
   | { kind: 'profile' | 'chat'; handle: string };
 
-const num = new Intl.NumberFormat('en-KE', { notation: 'compact' });
 const Live = dynamic(() => import('./live'), { ssr: false });
 
 function Avatar({ name }: { name: string }) {
@@ -47,11 +46,11 @@ function Dialog({ title, close, children }: { title: string; close: () => void; 
   </dialog>;
 }
 
-function Action({ icon, label, caption, onClick, active, count }: {
-  icon: ReactNode; label: string; caption?: string; onClick: () => void; active?: boolean; count?: number;
+function Action({ icon, label, onClick, active }: {
+  icon: ReactNode; label: string; onClick: () => void; active?: boolean;
 }) {
   return <button className={'action' + (active ? ' active' : '')} onClick={onClick} aria-label={label} aria-pressed={active} title={label}>
-    <span>{icon}</span><small>{caption ?? label}{count === undefined ? '' : ' · ' + num.format(count)}</small>
+    <span aria-hidden="true">{icon}</span>
   </button>;
 }
 
@@ -432,14 +431,14 @@ export default function Home() {
               : <Action icon={video.following ? <Check size={21} /> : <Plus size={22} />} label={video.following ? 'Following' : 'Follow'}
                 active={video.following} onClick={() => change('/creators/' + video.handle + '/follow', 'PUT', { enabled: !video.following },
                   item => item.creator_id === video.creator_id ? { ...item, following: !video.following } : item)} />}
-            <Action icon={<Heart size={22} fill={video.liked ? 'currentColor' : 'none'} />} label={video.liked ? 'Unlike' : 'Like'} caption="Like"
-              count={video.likes} active={video.liked} onClick={() => change('/videos/' + video.id + '/like', 'PUT', { enabled: !video.liked },
+            <Action icon={<Heart size={22} fill={video.liked ? 'currentColor' : 'none'} />} label={video.liked ? 'Unlike' : 'Like'}
+              active={video.liked} onClick={() => change('/videos/' + video.id + '/like', 'PUT', { enabled: !video.liked },
                 item => item.id === video.id ? { ...item, liked: !video.liked, likes: Math.max(0, item.likes + (video.liked ? -1 : 1)) } : item)} />
-            <Action icon={<MessageCircle size={22} />} label="Comments" count={video.comments} onClick={() => open({ kind: 'comments', video })} />
+            <Action icon={<MessageCircle size={22} />} label="Comments" onClick={() => open({ kind: 'comments', video })} />
             <a className="action" href={mediaUrl(video.id) + '?download=1'} download aria-label="Save video" title="Save video">
-              <span><ArrowDownToLine size={21} /></span><small>Save</small>
+              <span aria-hidden="true"><ArrowDownToLine size={21} /></span>
             </a>
-            <Action icon={<Bookmark size={21} fill={video.saved ? 'currentColor' : 'none'} />} label={video.saved ? 'Remove bookmark' : 'Bookmark'} caption="Bookmark"
+            <Action icon={<Bookmark size={21} fill={video.saved ? 'currentColor' : 'none'} />} label={video.saved ? 'Remove bookmark' : 'Bookmark'}
               active={video.saved} onClick={() => change('/videos/' + video.id + '/save', 'PUT', { enabled: !video.saved },
                 item => item.id === video.id ? { ...item, saved: !video.saved } : item)} />
           </Clip>)}
