@@ -1,0 +1,9 @@
+{
+  "latest": {
+    "version": "1.0.3",
+    "versionCode": 4,
+    "minSdk": 24,
+    "notes": ["New Mwitu logo and hand-lettered header."]
+  },
+  "previous": ["1.0.2", "1.0.1", "1.0.0"]
+}

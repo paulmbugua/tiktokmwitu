@@ -1,11 +1,13 @@
 import { renderDiscovery } from './discovery.mjs';
 import { handleMedia, readRange } from './media.mjs';
+import android from './android-releases.json' with { type: 'json' };
 
 const publicHost = 'tiktokmwitu.co.ke';
 const adminHost = 'admin.tiktokmwitu.co.ke';
 const apiHost = 'https://api.tiktokmwitu.co.ke';
-const androidFile = 'tiktok-mwitu-1.0.3.apk';
-const androidReleases = new Set([androidFile, 'tiktok-mwitu-1.0.2.apk', 'tiktok-mwitu-1.0.1.apk', 'tiktok-mwitu-1.0.0.apk']);
+const apkName = version => `tiktok-mwitu-${version}.apk`;
+const androidFile = apkName(android.latest.version);
+const androidReleases = new Set([androidFile, ...android.previous.map(apkName)]);
 const liveInvitePath = /^\/join\/(\d{6}|[0-9A-F]{16})\/?$/i;
 const mediaPath = /^\/media\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.(mp4|jpg)$/;
 
@@ -73,6 +75,15 @@ export default {
     if (publicSite && retrieval) {
       const invite = liveInvitePath.exec(url.pathname);
       if (invite) return noIndex(Response.redirect(new URL('/?live=' + invite[1], url), 302));
+      if (url.pathname === '/download/android/latest.json') {
+        const headers = { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' };
+        const apk = await env.MEDIA_BUCKET.head('releases/' + androidFile);
+        if (!apk?.size) return new Response(null, { status: 503, headers });
+        if (request.method === 'HEAD') {
+          return new Response(null, { headers: { ...headers, 'Content-Type': 'application/json' } });
+        }
+        return Response.json({ ...android.latest, bytes: apk.size }, { headers });
+      }
       if (url.pathname === '/download/android') {
         return Response.redirect(new URL('/download/' + androidFile, url), 302);
       }

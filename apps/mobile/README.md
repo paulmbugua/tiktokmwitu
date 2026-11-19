@@ -16,7 +16,13 @@ flutter build apk --release
 
 The release uses `android/key.properties`, which is ignored by Git. Keep the private keystore and its backup outside the repository. The properties are `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. Always use the original release key for website-distributed updates. Android links for `/watch/<video-id>` and `/join/<code>` use the public signing certificate fingerprint in `apps/web/public/.well-known/assetlinks.json`.
 
-The APK is at `build/app/outputs/flutter-apk/app-release.apk`. Website distribution serves versioned APKs from the private R2 bucket under `releases/`. The public entry point is `/download`. Upload each new signed build under its versioned key before updating the latest filename in the Worker.
+The APK is at `build/app/outputs/flutter-apk/app-release.apk`. Increase the version name and build number in `pubspec.yaml` for every release and build with the production configuration below. From the repository root, publish the signed APK with PowerShell while authenticated to Wrangler:
+
+```powershell
+./deploy/publish-android.ps1 -Apk './apps/mobile/build/app/outputs/flutter-apk/app-release.apk' -Notes @('Short description of the changes')
+```
+
+The publisher verifies the package and signing certificate, uploads the versioned APK to R2, updates the public release manifest, and verifies the download. Commit the updated `apps/web/cloudflare/android-releases.json` after publishing. The website download and the in-app update check use the same release. Android builds from 1.0.4 onward check on launch, when returning to the native feed, and periodically while it is open. People on earlier builds can get the first update from the website.
 
 ## Build iPhone
 

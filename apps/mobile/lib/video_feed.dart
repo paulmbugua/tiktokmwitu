@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 
+import 'android_updates.dart';
 import 'mwitu_links.dart';
 
 class _Clip {
@@ -162,6 +163,7 @@ class _VideoFeedState extends State<VideoFeed> with WidgetsBindingObserver {
               ],
             ),
           ),
+          AndroidUpdateBanner(active: widget.active),
           Expanded(
             child: _clips.isEmpty
                 ? _empty()
