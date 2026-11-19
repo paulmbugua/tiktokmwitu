@@ -10,8 +10,9 @@ import { StageControls, StageTile, type StageCommand, type StageState } from './
 import LiveGifts, { GiftEffects, type GiftEvent } from './live-gifts';
 import LiveInvitePlans from './live-invite-plans';
 import Promote from './promote';
+import ChallengeSetup from './live-challenge';
 
-const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects', stage: 'Guest stage', gifts: 'LIVE gifts', promote: 'Promote' };
+const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects', stage: 'Guest stage', gifts: 'LIVE gifts', promote: 'Promote', challenge:'LIVE challenge' };
 
 export type Grant = { id: string; url: string; token: string; host: boolean; guest?: boolean; hostId: string; shareCode?: string };
 export type ChatLine = { id: string; user_id: string; handle: string; body: string };
@@ -21,6 +22,8 @@ type Match = {
   starts_at: string | null; ends_at: string | null; expires_at: string;
   host_score: number; guest_score: number; winner_id: string | null; outcome: string | null;
   voted: 'host' | 'guest' | null;
+  voted_for?:string|null;
+  guests?:{user_id:string;display_name:string;status:'invited'|'accepted'|'ready';score:number}[];
 };
 type Snapshot = {
   hostProfile?:{handle:string;following:boolean};
@@ -40,6 +43,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   grant: Grant; user: Person | null; signIn: () => void; leave: () => void;
 }) {
   const audioBox = useRef<HTMLDivElement>(null);
+  const arena = useRef<HTMLDivElement>(null);
+  const controls = useRef<HTMLDivElement>(null);
   const chatList = useRef<HTMLDivElement>(null);
   const followChat = useRef(true);
   const connection = useRef<Room | null>(null);
@@ -76,15 +81,22 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const state = snapshot?.data ?? lastSnapshot.current;
   if (snapshot?.data) lastSnapshot.current = snapshot.data;
   const match = state?.match;
-  const activeGuest = match && ['ready', 'running'].includes(match.status) ? match.guest_id : null;
+  const roster=match?.guests??[];
+  const four=roster.length===3;
+  const ownBattle=roster.find(person=>person.user_id===user?.id);
+  const invited=!!user&&(four?ownBattle?.status==='invited'&&!!match&&['invited','ready'].includes(match.status):
+    match?.status==='invited'&&match.guest_id===user.id);
   const battle = !!match && ['invited', 'ready', 'running'].includes(match.status);
-  const split = !!activeGuest;
-  const readyMatch = match?.status === 'ready' && activeGuest === user?.id ? match.id : null;
+  const split = !!match&&['ready','running'].includes(match.status);
+  const battlePublisher=split&&!!user&&(four?!!ownBattle&&ownBattle.status!=='invited':match?.guest_id===user.id);
+  const readyMatch = match?.status==='ready'&&battlePublisher&&(!four||ownBattle?.status==='accepted')?match.id:null;
   const seats = state?.stage?.seats ?? [];
   const mySeat = seats.find(seat => seat.user_id === user?.id);
   const stageSeatId = mySeat?.on_stage ? mySeat.id : null;
   stageSeatRef.current = stageSeatId;
-  const isPublisher = grant.host || activeGuest === user?.id || !!stageSeatId;
+  const isPublisher = grant.host || battlePublisher || !!stageSeatId;
+  const mediaEligible=useRef(false);
+  mediaEligible.current=battlePublisher;
   const stageGuests = seats.filter(seat => seat.on_stage);
   const spotlight = stageGuests.length > 0 && !split ? state?.stage?.spotlight ?? null : null;
   const fullscreen = !!spotlight && state?.stage?.fullscreen === true;
@@ -239,20 +251,25 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   }, [grant.guest, state?.room.guest_access]);
 
   useEffect(() => {
-    if (!connected || !activeGuest || activeGuest !== user?.id || !match?.id || prepared.current === match.id) return;
+    if (!connected || !battlePublisher || !match?.id || (prepared.current===match.id&&!readyMatch)) return;
     const room = connection.current;
     if (!room) return;
     const matchId = match.id;
     let valid = true;
     async function prepare() {
       try {
-        await send(path + '/match', 'POST', { action: 'restore', matchId });
-        if (!valid) return;
-        await room!.localParticipant.enableCameraAndMicrophone();
-        if (!valid) return;
-        prepared.current = matchId;
-        setCamera(true);
-        setMic(true);
+        if(prepared.current!==matchId){
+          await send(path + '/match', 'POST', { action: 'restore', matchId });
+          if (!valid) return;
+          await room!.localParticipant.enableCameraAndMicrophone();
+          if (!valid) {
+            if(!mediaEligible.current)await releaseGuestMedia(room!);
+            return;
+          }
+          prepared.current = matchId;
+          setCamera(true);
+          setMic(true);
+        }
         if (readyMatch) await send(path + '/match', 'POST', { action: 'ready', matchId });
         if (valid) setRevision(value => value + 1);
       } catch (error) {
@@ -264,7 +281,26 @@ export default function Broadcast({ grant, user, signIn, leave }: {
     }
     void prepare();
     return () => { valid = false; };
-  }, [activeGuest, connected, match?.id, path, readyMatch, user?.id]);
+  }, [battlePublisher, connected, match?.id, path, readyMatch]);
+
+  useEffect(()=>{
+    const root=arena.current;
+    const tools=controls.current;
+    if(!root||!tools)return;
+    const composer=root.querySelector('.arena-conversation form');
+    const hud=root.querySelector('.arena-match');
+    const update=()=>{
+      root.style.setProperty('--stage-controls-height',Math.ceil(tools.getBoundingClientRect().height+
+        (composer?.getBoundingClientRect().height??0)+14)+'px');
+      root.style.setProperty('--stage-hud-height',Math.ceil(hud?.getBoundingClientRect().height??0)+'px');
+    };
+    const observer=new ResizeObserver(update);
+    observer.observe(tools);
+    if(composer)observer.observe(composer);
+    if(hud)observer.observe(hud);
+    update();
+    return ()=>observer.disconnect();
+  },[connected,chatAllowed,hideChat]);
 
   useEffect(() => {
     if (!stageSeatId) {
@@ -342,8 +378,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   function exit() {
     void perform(async () => {
       if (grant.host) await send(path + '/end', 'POST');
-      else if (activeGuest === user?.id && match?.status === 'running' && connected) {
-        await send(path + '/match', 'POST', { action: 'forfeit', matchId: match.id });
+      else if (battlePublisher && match && connected) {
+        await send(path + '/match', 'POST', { action: match.status==='running'?'forfeit':'decline', matchId: match.id });
       } else if (stageSeatId && connected) {
         await send(path + '/stage', 'POST', { action: 'leave', seatId: stageSeatId });
       }
@@ -364,20 +400,29 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const seconds = match?.status === 'running'
     ? Math.max(0, Math.ceil((new Date((starting ? match.starts_at : match.ends_at)!).getTime() - clock) / 1000)) : 0;
   const countdown = starting ? 'Starts in ' + seconds : Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
-  const canVote = connected && !!user && !grant.host && match?.guest_id !== user.id && !match?.voted && !starting && seconds > 0;
+  const canVote = connected && !!user && !grant.host && !battlePublisher && !match?.voted && !starting && seconds > 0;
   const pinned = state?.messages.find(message => message.id === state.room.pinned_id);
+  const contestants=match?[{id:grant.hostId,name:'Host',score:match.host_score},...(four
+    ?roster.map(person=>({id:person.user_id,name:person.display_name,score:person.score}))
+    :[{id:match.guest_id,name:match.guest_name,score:match.guest_score}])]:[];
   const tiles = [
     { id: grant.hostId, name: videos[grant.hostId]?.name ?? 'Host' },
-    ...(activeGuest ? [{ id: activeGuest, name: match!.guest_name }]
+    ...(split ? contestants.slice(1)
       : stageGuests.map(seat => ({ id: seat.user_id, name: seat.display_name }))),
   ];
-  const layout = split ? ' split' : spotlight ? ' spotlight-stage' + (fullscreen ? ' spotlight-fullscreen' : '') : stageGuests.length ? ' grid-stage' : '';
+  const cards=(state?.stage?.capacity??7)+1;
+  const grid=!split&&!spotlight&&stageGuests.length>0;
+  const layout = split ? (four?' battle-stage battle-four':' split battle-stage') : spotlight ? ' spotlight-stage' + (fullscreen ? ' spotlight-fullscreen' : '') : grid ? ' grid-stage' : '';
+  const fitAllowed=!split&&!grid&&(!spotlight||fullscreen);
 
-  return <div className="arena">
-    <div className={'arena-media' + layout + (fit ? ' fit' : '')} aria-label="LIVE video stage" data-tile-count={tiles.length}
-      style={{ '--rail-rows': Math.max(1, Math.ceil((tiles.length - 1) / 2)) } as CSSProperties}>
+  return <div className="arena" ref={arena}>
+    <div className={'arena-media' + layout + (fit&&fitAllowed ? ' fit' : '')} aria-label="LIVE video stage" data-tile-count={tiles.length} data-layout-cards={grid?cards:undefined}
+      style={{ '--rail-rows': Math.max(1, Math.ceil((tiles.length - 1) / 2)), '--grid-rows':cards/2 } as CSSProperties}>
       {tiles.map(tile => <StageTile key={tile.id} identity={tile.id} name={tile.name} track={videos[tile.id]?.track}
-        label={tiles.length > 1} featured={tile.id === spotlight} />)}
+        host={tile.id===grant.hostId} featured={tile.id === spotlight} />)}
+      {grid&&Array.from({length:Math.max(0,cards-tiles.length)},(_,index)=><div className="arena-tile vacant" key={'seat-'+index} aria-label="Open guest seat">
+        <UsersRound size={21} aria-hidden="true"/>
+      </div>)}
     </div>
     {connected && grant.host && spotlight && <button className="arena-action arena-pill arena-focus-toggle" disabled={pending}
       onClick={() => void stageAction({ action: 'fullscreen', userId: spotlight, enabled: !fullscreen })}>
@@ -391,7 +436,9 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         {state?.room.ended ? 'Broadcast ended.' : grant.guest && state?.room.guest_access === false ? 'Guest watching is off.' : connected ? 'LIVE' : status}
       </span>
       <div className="arena-buttons">
-        <button className="arena-action" aria-label={fit ? 'Fill screen' : 'Fit entire video'} title={fit ? 'Fill screen' : 'Fit entire video'} aria-pressed={fit} onClick={() => setFit(value => !value)}>{fit ? <Maximize size={18} /> : <Minimize size={18} />}</button>
+        {grant.host&&connected&&!battle&&!seats.length&&<button className="arena-action" aria-label="LIVE challenge" title="LIVE challenge"
+          aria-expanded={drawer==='challenge'} onClick={()=>toggleDrawer('challenge')}><Swords size={18}/></button>}
+        {fitAllowed&&<button className="arena-action" aria-label={fit ? 'Fill screen' : 'Fit entire video'} title={fit ? 'Fill screen' : 'Fit entire video'} aria-pressed={fit} onClick={() => setFit(value => !value)}>{fit ? <Maximize size={18} /> : <Minimize size={18} />}</button>}
         {connected && grant.host && <button className="arena-action" aria-label="Share LIVE" title="Share LIVE" onClick={() => toggleDrawer('share')} aria-expanded={drawer === 'share'}><Share2 size={18} /></button>}
         {connected && grant.host && <button className="arena-action" aria-label="Guest stage" title="Guest stage"
           onClick={() => toggleDrawer('stage')} aria-expanded={drawer === 'stage'}><UsersRound size={18} /></button>}
@@ -408,51 +455,42 @@ export default function Broadcast({ grant, user, signIn, leave }: {
           <button className="secondary" disabled={pending} onClick={() => void stageAction({ action: 'decline', seatId: mySeat.id })}>Decline stage invite</button>
         </div>
       </section>}
-      {match?.status === 'running' && <section className="battle" aria-label="1v1 scoreboard">
-        <div className="battle-head"><span><Swords size={17} /> 1v1 LIVE</span><strong>{countdown}</strong></div>
-        <div className="battle-score">
-          <div><small>Host</small><strong>{match.host_score}</strong></div>
-          <div><small>{match.guest_name}</small><strong>{match.guest_score}</strong></div>
+      {match?.status === 'running' && <section className="battle compact-battle" aria-label={four?'Four-person scoreboard':'1v1 scoreboard'}>
+        <div className="battle-head"><span><Swords size={16} /> {four?'Four-person challenge':'1v1 LIVE'}</span><strong>{countdown}</strong></div>
+        <div className="battle-score" style={{'--contestants':contestants.length} as CSSProperties}>
+          {contestants.map(person=><div key={person.id}><small title={person.name}>{person.name}</small><strong>{person.score}</strong>
+            {canVote&&<button className="secondary" disabled={pending} aria-label={'Vote for '+person.name}
+              onClick={()=>void matchAction('vote',{contestantId:person.id})}><Heart size={14}/> Vote</button>}
+          </div>)}
         </div>
         <div className="arena-buttons">
-          {canVote && <>
-            <button className="secondary" disabled={pending} onClick={() => void matchAction('vote', { side: 'host' })}><Heart size={16} /> Vote host</button>
-            <button className="secondary" disabled={pending} onClick={() => void matchAction('vote', { side: 'guest' })}><Heart size={16} /> Vote challenger</button>
-          </>}
-          {match.voted && <small>You voted for the {match.voted === 'host' ? 'host' : 'challenger'}.</small>}
+          {match.voted && <small>Vote recorded{match.voted_for?' for '+contestants.find(person=>person.id===match.voted_for)?.name:''}.</small>}
           {isPublisher && <button className="link" disabled={pending} onClick={() => {
-            if (window.confirm('Forfeit this match?')) void matchAction('forfeit');
+            if (window.confirm('Forfeit this challenge?')) void matchAction('forfeit');
           }}>Forfeit match</button>}
         </div>
       </section>}
-      {match?.status === 'finished' && !seats.length && <section className="battle" aria-label="Match result">
-        <div className="battle-head"><span><Swords size={17} /> {match.winner_id === null ? 'Draw' : (match.winner_id === grant.hostId ? 'Host wins' : match.guest_name + ' wins')}</span>
-          <strong>{match.host_score} – {match.guest_score}</strong></div>
-        {match.outcome !== 'time' && <small>Match ended early.</small>}
+      {match?.status==='finished'&&!seats.length&&<section className="battle" aria-label="Match result">
+        <div className="battle-head"><span><Swords size={17}/> {match.winner_id===null?'Draw':
+          (contestants.find(person=>person.id===match.winner_id)?.name??'Contestant')+' wins'}</span></div>
+        <div className="battle-score" style={{'--contestants':contestants.length} as CSSProperties}>
+          {contestants.map(person=><div key={person.id}><small title={person.name}>{person.name}</small><strong>{person.score}</strong></div>)}
+        </div>
+        {match.outcome!=='time'&&<small>Challenge ended early.</small>}
       </section>}
-      {match && ['invited','ready'].includes(match.status) && (match.status === 'ready' || grant.host || match.guest_id === user?.id) &&
-        <div className="battle">
-          <p>{match.status === 'ready' ? 'Waiting for the challenger to publish video…' :
-            match.guest_id === user?.id ? 'The host invited you to a 1v1 LIVE battle.' : 'Seat reserved for ' + match.guest_name + '. Share the LIVE link or code so they can join.'}</p>
-          <div className="arena-buttons">
-            {connected && match.guest_id === user?.id && match.status === 'invited' && <>
-              <button className="primary" disabled={pending} onClick={() => void matchAction('accept')}>Accept challenge</button>
-              <button className="secondary" disabled={pending} onClick={() => void matchAction('decline')}>Decline</button>
-            </>}
-            {grant.host && connected && <button className="secondary" disabled={pending} onClick={() => void matchAction('cancel')}>Cancel challenge</button>}
-          </div>
-        </div>}
-      {match?.status === 'cancelled' && !seats.length && <p className="hint">Challenge {match.outcome === 'guest_removed' ? 'ended' : match.outcome}.</p>}
-      {grant.host && connected && !battle && !seats.length &&
-        <form className="inline" onSubmit={event => {
-          event.preventDefault();
-          const form = event.currentTarget;
-          const handle = String(new FormData(form).get('handle')).trim().replace(/^@/, '');
-          void matchAction('invite', { handle });
-        }}>
-          <input name="handle" aria-label="Challenger handle" required maxLength={25} placeholder="Challenger’s @handle on Tiktok mwitu" />
-          <button className="primary" disabled={pending}><Swords size={17} /> Invite to 1v1</button>
-        </form>}
+      {match&&['invited','ready'].includes(match.status)&&(grant.host||invited||battlePublisher)&&<div className="battle">
+        <p>{invited ? (four?'The host invited you to a four-person LIVE challenge.':'The host invited you to a 1v1 LIVE challenge.') :
+          four ? 'Waiting for challengers · '+roster.filter(person=>person.status==='ready').length+'/3 ready' :
+            match.status==='ready'?'Waiting for the challenger’s camera…':'Invited '+match.guest_name+'.'}</p>
+        <div className="arena-buttons">
+          {connected&&invited&&<>
+            <button className="primary" disabled={pending} onClick={()=>void matchAction('accept')}>Accept challenge</button>
+            <button className="secondary" disabled={pending} onClick={()=>void matchAction('decline')}>Decline</button>
+          </>}
+          {grant.host&&connected&&<button className="secondary" disabled={pending} onClick={()=>void matchAction('cancel')}>Cancel challenge</button>}
+        </div>
+      </div>}
+      {match?.status==='cancelled'&&!seats.length&&<p className="hint">Challenge {match.outcome==='guest_removed'?'ended':match.outcome}.</p>}
     </div>
     <div className="arena-foot">
       {!hideChat && <div className="arena-conversation">
@@ -475,7 +513,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
           <button className="link" onClick={signIn}>Sign in to chat or vote</button>
         </div>}
       </div>}
-      <div className="arena-buttons arena-tools">
+      <div className="arena-buttons arena-tools" ref={controls}>
         <button className="arena-action" aria-label={hideChat ? 'Show chat' : 'Hide chat'} title={hideChat ? 'Show chat' : 'Hide chat'} aria-pressed={!hideChat} onClick={() => {
           followChat.current = true;
           setHideChat(value => !value);
@@ -531,6 +569,12 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         {liveNotice && <p role="status">{liveNotice}</p>}
         {(error || snapshot?.error) && <p className="error" role="alert">{error || snapshot?.error}</p>}
       </>}
+      {drawer==='challenge'&&grant.host&&connected&&<ChallengeSetup pending={pending} submit={async(action,data)=>{
+        const ok=await matchAction(action,data);
+        if(ok)setDrawer(null);
+        return ok;
+      }}/>}
+      {drawer==='challenge'&&error&&<p className="error" role="alert">{error}</p>}
       {drawer === 'gifts' && connected && user && !isPublisher &&
         <LiveGifts path={path} liveCode={grant.shareCode} liveRoom={grant.id} recipients={tiles} refresh={sync} />}
       {drawer === 'effects' && isPublisher && <>

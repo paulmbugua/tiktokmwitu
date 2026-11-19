@@ -22,6 +22,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS live_room_share_code ON live_rooms(share_code)
 ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS guest_access boolean NOT NULL DEFAULT true;
 ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS spotlight_id uuid REFERENCES users ON DELETE SET NULL;
 ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS spotlight_fullscreen boolean NOT NULL DEFAULT false;
+ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS stage_cards int NOT NULL DEFAULT 8 CHECK(stage_cards IN (2,4,6,8));
 CREATE TABLE IF NOT EXISTS live_stage_seats (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   room_id uuid NOT NULL REFERENCES live_rooms ON DELETE CASCADE,
@@ -49,12 +50,22 @@ CREATE TABLE IF NOT EXISTS live_matches (
 CREATE UNIQUE INDEX IF NOT EXISTS live_one_match_per_room ON live_matches(room_id)
   WHERE status IN ('invited','ready','running');
 CREATE INDEX IF NOT EXISTS live_matches_room ON live_matches(room_id,updated_at DESC);
+ALTER TABLE live_matches ADD COLUMN IF NOT EXISTS duration_seconds int NOT NULL DEFAULT 180 CHECK(duration_seconds IN (60,180,300));
+CREATE TABLE IF NOT EXISTS live_match_guests (
+  match_id uuid NOT NULL REFERENCES live_matches ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES users,
+  position int NOT NULL CHECK(position BETWEEN 1 AND 3),
+  status text NOT NULL DEFAULT 'invited' CHECK(status IN ('invited','accepted','ready')),
+  score int NOT NULL DEFAULT 0,
+  PRIMARY KEY(match_id,user_id), UNIQUE(match_id,position)
+);
 CREATE TABLE IF NOT EXISTS live_votes (
   match_id uuid NOT NULL REFERENCES live_matches ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES users,
   side text NOT NULL CHECK(side IN ('host','guest')),
   PRIMARY KEY(match_id,user_id)
 );
+ALTER TABLE live_votes ADD COLUMN IF NOT EXISTS contestant_id uuid REFERENCES users;
 CREATE TABLE IF NOT EXISTS live_messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   room_id uuid NOT NULL REFERENCES live_rooms ON DELETE CASCADE,
@@ -96,12 +107,12 @@ CREATE TABLE IF NOT EXISTS live_reports (
 export type LiveRoom = {
   id: string; host_id: string; online_at: Date | null; ended_at: Date | null; created_at: Date;
   chat_open: boolean; keywords: string[]; pinned_id: string | null; share_code: string; guest_access: boolean;
-  spotlight_id: string | null; spotlight_fullscreen: boolean;
+  spotlight_id: string | null; spotlight_fullscreen: boolean; stage_cards: number;
 };
-export const stageCapacity = 7;
 
 export async function stageSnapshot(client: PoolClient, room: LiveRoom, userId: string | null) {
-  if (room.ended_at) return { spotlight: null, fullscreen: false, capacity: stageCapacity, seats: [] };
+  const capacity=room.stage_cards-1;
+  if (room.ended_at) return { spotlight: null, fullscreen: false, capacity, seats: [] };
   const { rows: seats } = await client.query(`
     SELECT s.id,s.user_id,u.display_name,u.handle,s.accepted_at IS NOT NULL AS on_stage
     FROM live_stage_seats s JOIN users u ON u.id=s.user_id
@@ -110,7 +121,7 @@ export async function stageSnapshot(client: PoolClient, room: LiveRoom, userId: 
     ORDER BY s.invited_at,s.id`, [room.id, userId, room.host_id]);
   const spotlight = seats.some(seat => seat.on_stage && seat.user_id === room.spotlight_id) || room.spotlight_id === room.host_id
     ? room.spotlight_id : null;
-  return { spotlight, fullscreen: !!spotlight && room.spotlight_fullscreen, capacity: stageCapacity, seats };
+  return { spotlight, fullscreen: !!spotlight && room.spotlight_fullscreen, capacity, seats };
 }
 
 export async function dropStageSeat(client: PoolClient, roomId: string, userId: string) {
@@ -121,7 +132,24 @@ export type Match = {
   id: string; room_id: string; guest_id: string; status: 'invited' | 'ready' | 'running' | 'finished' | 'cancelled';
   starts_at: Date | null; ends_at: Date | null; expires_at: Date;
   host_score: number; guest_score: number; winner_id: string | null; outcome: string | null;
+  duration_seconds:number;
 };
+export type MatchGuest={user_id:string;display_name:string;status:'invited'|'accepted'|'ready';score:number};
+
+export async function matchGuests(client:PoolClient,matchId:string){
+  return (await client.query<MatchGuest>(`
+    SELECT g.user_id,u.display_name,g.status,g.score FROM live_match_guests g JOIN users u ON u.id=g.user_id
+    WHERE g.match_id=$1 ORDER BY g.position`,[matchId])).rows;
+}
+
+async function matchWinner(client:PoolClient,room:LiveRoom,match:Match,forfeiter?:string){
+  const guests=await matchGuests(client,match.id);
+  const scores=[{id:room.host_id,score:match.host_score},...(guests.length
+    ? guests.map(guest=>({id:guest.user_id,score:guest.score}))
+    : [{id:match.guest_id,score:match.guest_score}])]
+    .filter(person=>person.id!==forfeiter).sort((a,b)=>b.score-a.score);
+  return scores[0]&&scores[0].score!==scores[1]?.score?scores[0].id:null;
+}
 type Member = { moderator: boolean; muted_until: Date | null; banned: boolean };
 export const openMatch = "status IN ('invited','ready','running')";
 
@@ -163,8 +191,7 @@ export async function settle(client: PoolClient, room: LiveRoom) {
   const match = await currentMatch(client, room);
   if (!match) return false;
   if (match.status === 'running' && match.ends_at! <= new Date()) {
-    const winner = match.host_score === match.guest_score ? null
-      : match.host_score > match.guest_score ? room.host_id : match.guest_id;
+    const winner=await matchWinner(client,room,match);
     await client.query("UPDATE live_matches SET status='finished',outcome='time',winner_id=$2,updated_at=now() WHERE id=$1",
       [match.id, winner]);
     return true;
@@ -180,7 +207,7 @@ export async function endMatch(client: PoolClient, room: LiveRoom, outcome: stri
   const match = await currentMatch(client, room);
   if (!match) return;
   const winner = forfeiter && match.status === 'running'
-    ? (forfeiter === room.host_id ? match.guest_id : room.host_id) : null;
+    ? await matchWinner(client,room,match,forfeiter) : null;
   await client.query('UPDATE live_matches SET status=$2,outcome=$3,winner_id=$4,updated_at=now() WHERE id=$1',
-    [match.id, winner ? 'finished' : 'cancelled', outcome, winner]);
+    [match.id, forfeiter && match.status==='running' ? 'finished' : 'cancelled', outcome, winner]);
 }

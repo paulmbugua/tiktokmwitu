@@ -72,9 +72,11 @@ For the self-hosted VPS setup, use `compose.livekit.yaml` with `compose.yaml` an
 
 Sign in as the host, select Live, allow camera and microphone, then sign in from another browser profile to watch and send a chat message.
 
-## 1v1 LIVE and room moderation
+## LIVE layouts, challenges and room moderation
 
-Use separate signed-in browser profiles for the host, challenger, and viewers. The challenger first joins the host’s broadcast as a viewer. The host invites their handle, and the challenger accepts and shares their camera. The match shows both feeds, counts down from five seconds, then runs for three minutes. Each connected viewer gets one free vote. The API records scores, a winner or draw, and forfeits. A creator can start another match from the same broadcast.
+Hosts can choose 2, 4, 6, or 8 cards in **Guest stage**. The host occupies one card. The selection sets the shared grid and invitation capacity. The host can downsize after clearing the seats that would exceed the new capacity.
+
+From a solo broadcast, open **LIVE challenge** and choose two or four contestants, including the host. Invite the other accounts by handle and choose a one-, three-, or five-minute round. Each challenger accepts and shares their camera. When all challengers are ready, a shared five-second countdown starts. Each connected signed-in viewer has one free vote. Anonymous viewers can watch the scoreboard and result. The API records each score, the winner or draw, and forfeits.
 
 Open **Moderation** inside a broadcast to appoint room moderators, turn viewer chat on or off, filter keywords, pin or remove messages, apply or lift chat timeouts, ban or unban participants, and review reports and the action log. Host reports go directly to platform moderators. The admin dashboard can review LIVE reports and end a broadcast. Rules and roles apply to that broadcast. Chat history and actions are stored in PostgreSQL.
 

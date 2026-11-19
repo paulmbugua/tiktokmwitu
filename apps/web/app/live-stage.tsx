@@ -11,10 +11,11 @@ export type StageCommand =
   | { action: 'invite'; handle: string }
   | { action: 'accept' | 'decline' | 'leave' | 'remove'; seatId: string }
   | { action: 'spotlight'; userId: string | null }
+  | { action: 'layout'; cards: 2|4|6|8 }
   | { action: 'fullscreen'; userId: string; enabled: boolean };
 
-export function StageTile({ name, track, identity, label, featured }: {
-  name: string; track?: Track; identity: string; label: boolean; featured: boolean;
+export function StageTile({ name, track, identity, featured, host }: {
+  name: string; track?: Track; identity: string; featured: boolean; host: boolean;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const [muted, setMuted] = useState(false);
@@ -39,7 +40,7 @@ export function StageTile({ name, track, identity, label, featured }: {
     {track && <div className={muted ? 'arena-camera-muted' : undefined}>
       <video ref={video} playsInline muted={local} className={local && (!facing || facing === 'user') ? 'self-preview' : undefined} />
     </div>}
-    {label && <span>{name}</span>}
+    <span className={host?'arena-host-badge':undefined}>{host?'Host':name}</span>
   </div>;
 }
 
@@ -51,8 +52,12 @@ export function StageControls({ path, hostId, seats, capacity, spotlight, revisi
   const [filter, setFilter] = useState('');
   const full = seats.length >= capacity;
   const people = audience?.data?.filter(person => (person.display_name + ' @' + person.handle).toLowerCase().includes(filter.trim().toLowerCase()));
-  if (battle) return <p className="hint">Finish the 1v1 to invite stage guests.</p>;
+  if (battle) return <p className="hint">Finish the challenge to invite stage guests or change the layout.</p>;
   return <div className="stage-controls">
+    <div className="stage-layout-picker" role="group" aria-label="Stage layout">
+      {([2,4,6,8] as const).map(cards=><button className="secondary" key={cards} disabled={pending||seats.length>=cards}
+        aria-pressed={cards===capacity+1} onClick={()=>void onCommand({action:'layout',cards})}>{cards} cards</button>)}
+    </div>
     <div className="stage-controls-heading">
       <strong>Guest seats · {seats.length}/{capacity}</strong>
       {seats.some(seat => seat.on_stage) && <div className="arena-buttons">

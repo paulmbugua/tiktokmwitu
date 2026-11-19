@@ -4,7 +4,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { parse, requireUser, uuid } from './infra';
 import { liveService, notifyRoom, roomName } from './live';
-import { currentMatch, lockedRoom, member, requireOpen, settle } from './live-store';
+import { currentMatch, lockedRoom, matchGuests, member, requireOpen, settle } from './live-store';
 import { coinBalance, giftCatalog } from './gift-store';
 
 const giftInput = z.object({ requestId: z.uuid(), recipientId: z.uuid(), gift: z.enum(['spark', 'matatu', 'chai', 'drums', 'crown', 'comet']) });
@@ -37,7 +37,10 @@ export class LiveGiftsController {
       const match = await currentMatch(client, room);
       const active = (await client.query<{ user_id: string }>(
         'SELECT user_id FROM live_stage_seats WHERE room_id=$1 AND accepted_at IS NOT NULL', [id])).rows.map(row => row.user_id);
-      if (match && ['ready', 'running'].includes(match.status)) active.push(match.guest_id);
+      if (match && ['ready', 'running'].includes(match.status)) {
+        const guests=await matchGuests(client,match.id);
+        active.push(...(guests.length?guests.filter(person=>person.status!=='invited').map(person=>person.user_id):[match.guest_id]));
+      }
       active.push(room.host_id);
       if (active.includes(sender.id)) throw new ForbiddenException('Send gifts while watching from the audience.');
       if (!active.includes(input.recipientId)) throw new ConflictException('That person has left the stage.');

@@ -4,7 +4,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { cleanText, parse, requireUser, uuid } from './infra';
 import { connectedUser, guestIdentityPrefix, liveService, notifyRoom, roomName } from './live';
-import { currentMatch, dropStageSeat, endMatch, lockedRoom, member, requireOpen, settle } from './live-store';
+import { currentMatch, dropStageSeat, endMatch, lockedRoom, matchGuests, member, requireOpen, settle } from './live-store';
 
 const controls = z.discriminatedUnion('action', [
   z.object({ action: z.literal('chat'), open: z.boolean() }),
@@ -114,7 +114,8 @@ export class LiveModerationController {
               await dropStageSeat(client, id, targetId);
               await settle(client, room);
               const match = await currentMatch(client, room);
-              if (match?.guest_id === targetId) await endMatch(client, room, 'guest_removed', targetId);
+              if(match&&(match.guest_id===targetId||(await matchGuests(client,match.id)).some(person=>person.user_id===targetId)))
+                await endMatch(client, room, 'guest_removed', targetId);
               break;
             }
             case 'unban':

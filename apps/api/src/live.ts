@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { AccessToken, DataPacket_Kind, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { z } from 'zod';
 import { cleanText, cookie, db, handleSchema, identity, parse, requireUser, uuid, type Person } from './infra';
-import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle, stageSnapshot, type LiveRoom } from './live-store';
+import { currentMatch, endMatch, lockedRoom, matchGuests, member, requireOpen, settle, stageSnapshot, type LiveRoom } from './live-store';
 import { recentGifts } from './gift-store';
 import { browserKey } from './commerce';
 import { checkInvite, claimInvite, isAudienceCode, normalizeInvite, type InvitePass } from './live-invites';
@@ -18,7 +18,6 @@ const service = url && internalUrl && key && secret
   : null;
 export const roomName = (id: string) => 'mwitu-' + id;
 const encoder = new TextEncoder();
-const duration = 180;
 export const guestIdentityPrefix = 'guest:';
 
 async function handoffRoom(raw: string) {
@@ -86,7 +85,7 @@ export async function finishRoom(id: string, outcome: string, moderator?: Person
 
 let ticking = false;
 const hostMissing = new Map<string, number>();
-const guestMissing = new Map<string, number>();
+const guestMissing = new Map<string, { matchId:string; userId:string; since:number }>();
 
 export async function reconcileLive() {
   if (!service || ticking) return;
@@ -113,11 +112,16 @@ export async function reconcileLive() {
 
         let updated = await settle(client, fresh);
         let match = await currentMatch(client, fresh);
-        if (match?.status === 'running' && !participants.some(person => person.identity === match?.guest_id)) {
-          const since = guestMissing.get(room.id) ?? Date.now();
-          guestMissing.set(room.id, since);
+        const roster=match?await matchGuests(client,match.id):[];
+        const battleGuests=roster.length ? roster.filter(person=>person.status!=='invited').map(person=>person.user_id)
+          : match&&['ready','running'].includes(match.status)?[match.guest_id]:[];
+        const missing=match?.status==='running'?battleGuests.find(userId=>!connected.includes(userId)):undefined;
+        if (match && missing) {
+          const previous=guestMissing.get(room.id);
+          const since = previous?.matchId===match.id&&previous.userId===missing ? previous.since : Date.now();
+          guestMissing.set(room.id, {matchId:match.id,userId:missing,since});
           if (Date.now() - since > 15000) {
-            await endMatch(client, fresh, 'guest_left', match.guest_id);
+            await endMatch(client, fresh, 'guest_left', missing);
             match = undefined;
             updated = true;
           }
@@ -143,7 +147,7 @@ export async function reconcileLive() {
           if (banned.has(person.identity) || (!fresh.guest_access && person.identity.startsWith(guestIdentityPrefix))) {
             return service.removeParticipant(name, person.identity);
           }
-          const guest = match?.guest_id === person.identity && ['ready', 'running'].includes(match.status);
+          const guest = match && battleGuests.includes(person.identity) && ['ready', 'running'].includes(match.status);
           if (person.identity !== fresh.host_id && person.permission?.canPublish && !guest && !stage.has(person.identity)) {
             await service.updateParticipant(name, person.identity, { permission: publishPermission(false) });
           }
@@ -254,7 +258,8 @@ export class LiveController {
       return {
         self: { role: 'guest', mutedUntil: null },
         room: { id: fresh.id, ended: !!fresh.ended_at, guest_access: fresh.guest_access, chat_open: false, pinned_id: null },
-        match: fresh.guest_access ? match : undefined, stage: fresh.guest_access ? await stageSnapshot(client, fresh, null) : undefined,
+        match: fresh.guest_access && match ? {...match, guests:await matchGuests(client,match.id)} : undefined,
+        stage: fresh.guest_access ? await stageSnapshot(client, fresh, null) : undefined,
         messages: [], gifts: fresh.guest_access ? await recentGifts(client, fresh.id) : [], now: Date.now(),
       };
     });
@@ -310,8 +315,9 @@ export class LiveController {
         FROM users u WHERE u.id=$1`,[room.host_id,user.id]);
       const { rows: [match] } = await client.query(`
         SELECT m.id,m.guest_id,m.status,m.starts_at,m.ends_at,m.expires_at,m.host_score,m.guest_score,m.winner_id,m.outcome,
-          u.display_name AS guest_name, (SELECT side FROM live_votes WHERE match_id=m.id AND user_id=$2) AS voted
-        FROM live_matches m JOIN users u ON u.id=m.guest_id WHERE m.room_id=$1
+          u.display_name AS guest_name, v.side AS voted, v.contestant_id AS voted_for
+        FROM live_matches m JOIN users u ON u.id=m.guest_id
+        LEFT JOIN live_votes v ON v.match_id=m.id AND v.user_id=$2 WHERE m.room_id=$1
         ORDER BY m.updated_at DESC,m.id DESC LIMIT 1`, [room.id, user.id]);
       const { rows: messages } = await client.query(`
         SELECT m.id,m.user_id,m.body,u.handle FROM live_messages m JOIN users u ON u.id=m.user_id
@@ -319,7 +325,8 @@ export class LiveController {
         [room.id, room.pinned_id]);
       return {
         self, hostProfile, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
-        match, stage: await stageSnapshot(client, room, user.id), messages: messages.reverse(),
+        match:match?{...match,guests:await matchGuests(client,match.id)}:undefined,
+        stage: await stageSnapshot(client, room, user.id), messages: messages.reverse(),
         gifts: await recentGifts(client, room.id), now: Date.now(),
       };
     });
@@ -352,9 +359,11 @@ export class LiveController {
     const user = await requireUser(req);
     const id = uuid(raw);
     const command = parse(z.discriminatedUnion('action', [
-      z.object({ action: z.literal('invite'), handle: handleSchema }),
+      z.object({ action: z.literal('invite'), handle: handleSchema, seconds:z.union([z.literal(60),z.literal(180),z.literal(300)]).default(180) }),
+      z.object({ action: z.literal('invite-four'), handles:z.array(handleSchema).length(3),
+        seconds:z.union([z.literal(60),z.literal(180),z.literal(300)]).default(180) }),
       z.object({ action: z.enum(['accept', 'decline', 'cancel', 'restore', 'ready', 'forfeit']), matchId: z.uuid() }),
-      z.object({ action: z.literal('vote'), matchId: z.uuid(), side: z.enum(['host', 'guest']) }),
+      z.object({ action: z.literal('vote'), matchId: z.uuid(), side: z.enum(['host', 'guest']).optional(), contestantId:z.uuid().optional() }),
     ]), input);
     await connectedUser(id, user.id);
     if (command.action === 'ready') await waitForCamera(id, user.id);
@@ -365,40 +374,53 @@ export class LiveController {
       const host = room.host_id === user.id;
       const match = await currentMatch(client, room);
 
-      if (command.action === 'invite') {
+      if (command.action === 'invite'||command.action==='invite-four') {
         if (!host) throw new ForbiddenException('Only the host can invite a challenger.');
         if (match) throw new ConflictException('Finish the current invite or match first.');
         if ((await client.query(`SELECT 1 FROM live_stage_seats WHERE room_id=$1
           AND (accepted_at IS NOT NULL OR expires_at>clock_timestamp()) LIMIT 1`, [id])).rowCount) {
-          throw new ConflictException('Clear the guest stage before starting a 1v1.');
+          throw new ConflictException('Clear the guest stage before starting a challenge.');
         }
         await client.query('UPDATE live_rooms SET spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1 AND spotlight_id IS NOT NULL', [id]);
-        const { rows: [guest] } = await client.query<Person>('SELECT id,handle,display_name FROM users WHERE handle=$1', [command.handle]);
-        if (!guest || guest.id === user.id) throw new NotFoundException('Choose another Tiktok mwitu account.');
-        await member(client, room, guest);
-        await client.query(`INSERT INTO live_matches(room_id,guest_id,status,expires_at)
-          VALUES ($1,$2,'invited',clock_timestamp()+interval '5 minutes')`, [id, guest.id]);
+        const handles=command.action==='invite'?[command.handle]:command.handles;
+        const {rows:people}=await client.query<Person>('SELECT id,handle,display_name FROM users WHERE handle=ANY($1::text[])',[handles]);
+        if(people.length!==handles.length||people.some(person=>person.id===user.id))
+          throw new NotFoundException('Enter distinct handles for other Tiktok mwitu accounts.');
+        const ordered=handles.map(handle=>people.find(person=>person.handle===handle)!);
+        for(const guest of ordered)await member(client,room,guest);
+        const {rows:[created]}=await client.query<{id:string}>(`INSERT INTO live_matches(room_id,guest_id,status,expires_at,duration_seconds)
+          VALUES ($1,$2,'invited',clock_timestamp()+interval '5 minutes',$3) RETURNING id`, [id, ordered[0].id,command.seconds]);
+        if(ordered.length===3)await client.query(`INSERT INTO live_match_guests(match_id,user_id,position)
+          SELECT $1,user_id,position FROM unnest($2::uuid[]) WITH ORDINALITY AS people(user_id,position)`,[created.id,ordered.map(person=>person.id)]);
         return { ok: true };
       }
 
       if (!match || match.id !== command.matchId) return { ok: false, message: 'This match is no longer available.' };
-      const guest = user.id === match.guest_id;
+      const roster=await matchGuests(client,match.id);
+      const contestant=roster.find(person=>person.user_id===user.id);
+      const guest=roster.length?!!contestant:user.id===match.guest_id;
 
       switch (command.action) {
         case 'accept':
-          if (!guest || match.status !== 'invited') throw new ForbiddenException();
+          if (!guest || (roster.length ? contestant?.status!=='invited'||!['invited','ready'].includes(match.status) : match.status!=='invited')) throw new ForbiddenException();
           await liveService().updateParticipant(roomName(id), user.id, { permission: publishPermission(true) });
-          await client.query("UPDATE live_matches SET status='ready',expires_at=now()+interval '45 seconds',updated_at=now() WHERE id=$1", [match.id]);
+          if(contestant)await client.query("UPDATE live_match_guests SET status='accepted' WHERE match_id=$1 AND user_id=$2",[match.id,user.id]);
+          await client.query(`UPDATE live_matches SET status='ready',expires_at=CASE WHEN $2 THEN expires_at ELSE now()+interval '45 seconds' END,
+            updated_at=now() WHERE id=$1`,[match.id,roster.length>0]);
           break;
         case 'restore':
-          if (!guest || !['ready', 'running'].includes(match.status)) throw new ForbiddenException();
+          if (!guest || contestant?.status==='invited' || !['ready', 'running'].includes(match.status)) throw new ForbiddenException();
           await liveService().updateParticipant(roomName(id), user.id, { permission: publishPermission(true) });
           break;
         case 'ready': {
-          if (!guest || match.status !== 'ready') throw new ForbiddenException();
+          if (!guest || contestant?.status==='invited' || match.status !== 'ready') throw new ForbiddenException();
+          if(contestant){
+            await client.query("UPDATE live_match_guests SET status='ready' WHERE match_id=$1 AND user_id=$2",[match.id,user.id]);
+            if(roster.some(person=>person.user_id!==user.id&&person.status!=='ready'))break;
+          }
           await client.query(`
-            UPDATE live_matches SET status='running',starts_at=clock_timestamp()+interval '5 seconds',
-              ends_at=clock_timestamp()+make_interval(secs=>$2 + 5),updated_at=now() WHERE id=$1`, [match.id, duration]);
+            UPDATE live_matches SET status='running',starts_at=statement_timestamp()+interval '5 seconds',
+              ends_at=statement_timestamp()+make_interval(secs=>duration_seconds + 5),updated_at=now() WHERE id=$1`, [match.id]);
           break;
         }
         case 'decline':
@@ -418,13 +440,21 @@ export class LiveController {
           if (match.status !== 'running' || Date.now() < match.starts_at!.getTime()) {
             throw new ConflictException('Voting opens after the countdown.');
           }
+          const target=command.contestantId??(command.side==='host'?room.host_id:command.side==='guest'&&!roster.length?match.guest_id:undefined);
+          if(!target||(target!==room.host_id&&(roster.length?!roster.some(person=>person.user_id===target):match.guest_id!==target)))
+            throw new NotFoundException('Choose a contestant in this challenge.');
+          const side=target===room.host_id?'host':'guest';
           const { rowCount } = await client.query(`
-            INSERT INTO live_votes(match_id,user_id,side)
-            SELECT $1,$2,$3 WHERE EXISTS(SELECT 1 FROM live_matches WHERE id=$1 AND ends_at>clock_timestamp())
-            ON CONFLICT DO NOTHING`, [match.id, user.id, command.side]);
+            INSERT INTO live_votes(match_id,user_id,side,contestant_id)
+            SELECT $1,$2,$3,$4 WHERE EXISTS(SELECT 1 FROM live_matches WHERE id=$1 AND ends_at>clock_timestamp())
+            ON CONFLICT DO NOTHING`, [match.id, user.id, side,target]);
           if (!rowCount) return { ok: false, message: 'Voting is closed or you already voted.' };
-          const column = command.side === 'host' ? 'host_score' : 'guest_score';
-          await client.query('UPDATE live_matches SET ' + column + '=' + column + '+1 WHERE id=$1', [match.id]);
+          if(side==='guest'&&roster.length){
+            await client.query('UPDATE live_match_guests SET score=score+1 WHERE match_id=$1 AND user_id=$2',[match.id,target]);
+          }else{
+            const column=side==='host'?'host_score':'guest_score';
+            await client.query('UPDATE live_matches SET ' + column + '=' + column + '+1 WHERE id=$1', [match.id]);
+          }
           break;
         }
       }

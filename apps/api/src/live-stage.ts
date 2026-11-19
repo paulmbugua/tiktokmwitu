@@ -4,13 +4,14 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { handleSchema, parse, requireUser, uuid, type Person } from './infra';
 import { connectedUser, liveService, notifyRoom, publishPermission, roomName } from './live';
-import { currentMatch, dropStageSeat, lockedRoom, member, requireOpen, settle, stageCapacity } from './live-store';
+import { currentMatch, dropStageSeat, lockedRoom, member, requireOpen, settle } from './live-store';
 
 const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('invite'), handle: handleSchema }),
   z.object({ action: z.enum(['accept', 'decline', 'restore', 'leave', 'remove']), seatId: z.uuid() }),
   z.object({ action: z.literal('spotlight'), userId: z.uuid().nullable() }),
   z.object({ action: z.literal('fullscreen'), userId: z.uuid(), enabled: z.boolean() }),
+  z.object({ action: z.literal('layout'), cards: z.union([z.literal(2),z.literal(4),z.literal(6),z.literal(8)]) }),
 ]);
 
 @Controller('live/:id/stage')
@@ -43,22 +44,30 @@ export class LiveStageController {
       requireOpen(room);
       await member(client, room, actor);
       const host = room.host_id === actor.id;
-      if (['invite', 'remove', 'spotlight', 'fullscreen'].includes(command.action) && !host) {
+      if (['invite', 'remove', 'spotlight', 'fullscreen','layout'].includes(command.action) && !host) {
         throw new ForbiddenException('Only the host can manage the stage.');
       }
       let targetId: string | null;
       if (command.action === 'invite') {
         await settle(client, room);
-        if (await currentMatch(client, room)) throw new ConflictException('Finish the 1v1 before inviting stage guests.');
+        if (await currentMatch(client, room)) throw new ConflictException('Finish the challenge before inviting stage guests.');
         await client.query('DELETE FROM live_stage_seats WHERE room_id=$1 AND accepted_at IS NULL AND expires_at<=clock_timestamp()', [id]);
         const { rows: [guest] } = await client.query<Person>('SELECT id,handle,display_name FROM users WHERE handle=$1', [command.handle]);
         if (!guest || guest.id === actor.id) throw new NotFoundException('Choose another Tiktok mwitu account.');
         await member(client, room, guest);
         const seats = await client.query<{ user_id: string }>('SELECT user_id FROM live_stage_seats WHERE room_id=$1', [id]);
         if (seats.rows.some(seat => seat.user_id === guest.id)) return;
-        if (seats.rows.length >= stageCapacity) throw new ConflictException('All seven guest seats are reserved.');
+        if (seats.rows.length >= room.stage_cards-1) throw new ConflictException('All guest seats in this layout are reserved.');
         await client.query('INSERT INTO live_stage_seats(room_id,user_id) VALUES ($1,$2)', [id, guest.id]);
         targetId = guest.id;
+      } else if (command.action === 'layout') {
+        await settle(client,room);
+        if(await currentMatch(client,room))throw new ConflictException('Layout is set by the active challenge.');
+        const {rows:[{count}]}=await client.query<{count:number}>(`SELECT count(*)::int FROM live_stage_seats WHERE room_id=$1
+          AND (accepted_at IS NOT NULL OR expires_at>clock_timestamp())`,[id]);
+        if(count>=command.cards)throw new ConflictException('Remove guests or cancel pending invites before reducing the layout.');
+        await client.query('UPDATE live_rooms SET stage_cards=$2 WHERE id=$1',[id,command.cards]);
+        targetId=null;
       } else if (command.action === 'spotlight') {
         targetId = command.userId;
         if (targetId && targetId !== room.host_id && !(await client.query(
