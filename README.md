@@ -83,3 +83,12 @@ Open **Moderation** inside a broadcast to appoint room moderators, turn viewer c
 Start a LIVE on Tiktok mwitu and open **Share LIVE**. Share the link wherever your audience can open it, or show the 12-character code and tell viewers to enter it in Tiktok mwitu’s LIVE menu. Visitors can select **Watch as guest** to see the video and 1v1 scoreboard without creating an account. Sign-in is required to read or send room chat, vote or take a challenger seat. Sign-in or signup returns viewers directly to the same LIVE. Links and codes stop working when the broadcast ends. The host can turn off guest watching in **Moderation**, which disconnects current guests and stops new guest admissions.
 
 For a 1v1 handoff, reserve the challenger’s seat using their Tiktok mwitu handle before sharing. The reservation lasts five minutes. The invited account can accept and enable its camera on arrival. Everyone else joins as a viewer. TikTok LIVE participants, chat, scores, gifts and stream state aren’t transferred.
+
+## LIVE gifting and payment setup
+
+Signed-in viewers can send virtual gifts to the host, an accepted guest, or a 1v1 challenger. The wallet sells coin packs in Kenyan shillings. Gift receipts identify the sender and recipient. Coins and received gifts are for use on the platform, with no cash withdrawal flow.
+
+- **M-Pesa.** Provision Daraja M-Pesa Express for the Mwitu merchant. In the private API environment set `MPESA_ENV=production`, `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY` and `PAYMENT_API_ORIGIN=https://api.tiktokmwitu.co.ke`. The API supplies the order-specific HTTPS callback to Daraja. The default `MPESA_TRANSACTION_TYPE` is `CustomerPayBillOnline`.
+- **Card.** Set the Mwitu merchant's KES-enabled `PAYSTACK_SECRET_KEY` in the private API environment. In Paystack configure `https://api.tiktokmwitu.co.ke/api/gifts/webhooks/card` and set `PAYSTACK_WEBHOOK_SECRET` when using Paystack's dedicated signing secret. The API also accepts Paystack's legacy signature and verifies the payment with Paystack before adding coins.
+
+After updating credentials, recreate the API service. On an HTTPS production deployment, sandbox credentials stay disabled by default. Use `GIFTS_ALLOW_TEST_PAYMENTS=true` only in an isolated HTTPS test deployment. Test each provider with the merchant's sandbox before enabling production credentials.

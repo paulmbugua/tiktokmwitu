@@ -22,6 +22,9 @@ import { LiveModerationController } from './live-moderation';
 import { playbackUrl, sweepCloudMedia, useR2 } from './media-storage';
 import { liveSchema } from './live-store';
 import { VideosController } from './videos';
+import { giftSchema } from './gift-store';
+import { GiftPaymentsController, reconcileTopups } from './gift-payments';
+import { LiveGiftsController } from './live-gifts';
 
 @Controller()
 class HealthController {
@@ -42,7 +45,8 @@ class HealthController {
       return req.ip ?? req.socket.remoteAddress ?? 'unknown';
     },
   })],
-  controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, LiveStageController, LiveModerationController, AdminController],
+  controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, LiveStageController, LiveModerationController,
+    AdminController, GiftPaymentsController, LiveGiftsController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 class AppModule {}
@@ -51,8 +55,8 @@ async function start() {
   if (!process.env.DATABASE_URL && !process.env.PGHOST) throw new Error('Set DATABASE_URL or PGHOST before starting the API.');
   const publicMedia = join(mediaDir, 'public');
   await mkdir(publicMedia, { recursive: true });
-  await db.query(schema + liveSchema);
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  await db.query(schema + liveSchema + giftSchema);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
   app.use(helmet());
   app.enableCors({
@@ -65,6 +69,10 @@ async function start() {
   app.use(cookieParser());
   app.use('/api', (req: Request, res: Response, next: NextFunction) => {
     res.setHeader('Cache-Control', 'no-store');
+    if (req.method === 'POST' && /^\/gifts\/webhooks\/(card|mpesa\/[a-f0-9-]{36}\/[a-f0-9]{64})$/.test(req.path)) {
+      next();
+      return;
+    }
     const requestOrigin = req.get('origin');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)
       && (req.get('x-mwitu-request') !== '1' || (requestOrigin && !allowedOrigins.includes(requestOrigin)))) {
@@ -133,6 +141,8 @@ async function start() {
   expiry.unref();
   const liveSweep = setInterval(() => void reconcileLive(), 4000);
   liveSweep.unref();
+  const paymentSweep = setInterval(() => void reconcileTopups(), 4000);
+  paymentSweep.unref();
   if (useR2) {
     const mediaSweep = setInterval(() => void sweepCloudMedia().catch(error => console.error('Media cleanup failed', error)), 60000);
     mediaSweep.unref();

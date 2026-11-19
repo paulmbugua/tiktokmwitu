@@ -1,14 +1,15 @@
 'use client';
 
-import { Camera, CameraOff, Expand, Flag, Heart, LayoutGrid, LogOut, Maximize, MessageCircle, Mic, MicOff, Minimize, Send, Share2, Shield, Sparkles, Swords, UsersRound, X } from 'lucide-react';
+import { Camera, CameraOff, Expand, Flag, Gift, Heart, LayoutGrid, LogOut, Maximize, MessageCircle, Mic, MicOff, Minimize, Send, Share2, Shield, Sparkles, Swords, UsersRound, X } from 'lucide-react';
 import { LocalVideoTrack, Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { send, useData, type Person } from './client';
 import LiveModeration from './live-controls';
 import { CameraEffects, cameraLooks, type CameraLook } from './live-effects';
 import { StageControls, StageTile, type StageCommand, type StageState } from './live-stage';
+import LiveGifts, { GiftEffects, type GiftEvent } from './live-gifts';
 
-const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects', stage: 'Guest stage' };
+const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects', stage: 'Guest stage', gifts: 'LIVE gifts' };
 
 export type Grant = { id: string; url: string; token: string; host: boolean; guest?: boolean; hostId: string; shareCode: string };
 export type ChatLine = { id: string; user_id: string; handle: string; body: string };
@@ -22,7 +23,7 @@ type Match = {
 type Snapshot = {
   room: { id: string; chat_open: boolean; pinned_id: string | null; ended: boolean; guest_access: boolean };
   self: { role: 'host' | 'moderator' | 'viewer' | 'guest'; mutedUntil: string | null };
-  match?: Match; stage?: StageState; messages: ChatLine[]; now: number;
+  match?: Match; stage?: StageState; messages: ChatLine[]; gifts?: GiftEvent[]; now: number;
 };
 
 async function releaseGuestMedia(room: Room) {
@@ -396,6 +397,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       {fullscreen ? 'Restore guest tiles' : 'Maximize spotlight'}
     </button>}
     <div ref={audioBox} hidden />
+    <GiftEffects events={state?.gifts} now={state?.now} />
     <div className="arena-top">
       <span className={'arena-status' + (connected && !state?.room.ended ? ' on-air' : '')} role="status">
         {state?.room.ended ? 'Broadcast ended.' : grant.guest && state?.room.guest_access === false ? 'Guest watching is off.' : connected ? 'LIVE' : status}
@@ -491,6 +493,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
           setHideChat(value => !value);
         }}><MessageCircle size={19} /></button>
         {enableAudio && <button className="arena-action arena-pill" onClick={() => void connection.current?.startAudio().catch(() => setError('Could not enable audio.'))}>Enable sound</button>}
+        {connected && !isPublisher && <button className="arena-action arena-pill arena-gift-button" aria-label="LIVE gifts"
+          aria-expanded={drawer === 'gifts'} onClick={() => user ? toggleDrawer('gifts') : signIn()}><Gift size={19} /> Gifts</button>}
         {connected && isPublisher && <>
           <button className="arena-action" aria-label={camera ? 'Turn camera off' : 'Turn camera on'} title={camera ? 'Turn camera off' : 'Turn camera on'} disabled={pending || effectPending} onClick={() => toggleDevice('camera')}>{camera ? <Camera size={19} /> : <CameraOff size={19} />}</button>
           <button className="arena-action" aria-label={mic ? 'Mute microphone' : 'Unmute microphone'} title={mic ? 'Mute microphone' : 'Unmute microphone'} disabled={pending} onClick={() => toggleDevice('mic')}>{mic ? <Mic size={19} /> : <MicOff size={19} />}</button>
@@ -539,6 +543,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         {liveNotice && <p role="status">{liveNotice}</p>}
         {(error || snapshot?.error) && <p className="error" role="alert">{error || snapshot?.error}</p>}
       </>}
+      {drawer === 'gifts' && connected && user && !isPublisher &&
+        <LiveGifts path={path} liveCode={grant.shareCode} recipients={tiles} refresh={sync} />}
       {drawer === 'effects' && isPublisher && <>
         <p className="hint">{camera && localVideo ? 'Changes your camera for everyone watching.' : 'Turn on your camera to use effects.'}</p>
         <div className="arena-looks" aria-label="Camera presets">

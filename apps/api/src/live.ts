@@ -7,6 +7,7 @@ import { AccessToken, DataPacket_Kind, RoomServiceClient, TrackSource } from 'li
 import { z } from 'zod';
 import { cleanText, cookie, db, handleSchema, identity, parse, requireUser, uuid, type Person } from './infra';
 import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle, stageSnapshot, type LiveRoom } from './live-store';
+import { recentGifts } from './gift-store';
 
 const { LIVEKIT_URL: url, LIVEKIT_API_KEY: key, LIVEKIT_API_SECRET: secret } = process.env;
 const internalUrl = process.env.LIVEKIT_INTERNAL_URL || url;
@@ -225,7 +226,7 @@ export class LiveController {
         self: { role: 'guest', mutedUntil: null },
         room: { id: fresh.id, ended: !!fresh.ended_at, guest_access: fresh.guest_access, chat_open: false, pinned_id: null },
         match: fresh.guest_access ? match : undefined, stage: fresh.guest_access ? await stageSnapshot(client, fresh, null) : undefined,
-        messages: [], now: Date.now(),
+        messages: [], gifts: fresh.guest_access ? await recentGifts(client, fresh.id) : [], now: Date.now(),
       };
     });
   }
@@ -286,7 +287,8 @@ export class LiveController {
         [room.id, room.pinned_id]);
       return {
         self, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
-        match, stage: await stageSnapshot(client, room, user.id), messages: messages.reverse(), now: Date.now(),
+        match, stage: await stageSnapshot(client, room, user.id), messages: messages.reverse(),
+        gifts: await recentGifts(client, room.id), now: Date.now(),
       };
     });
   }

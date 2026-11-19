@@ -212,6 +212,57 @@ dialog:has(.arena){inset:0;margin:0;border:0;border-radius:0;width:100%;max-widt
 .stage-controls form{grid-template-columns:minmax(0,1fr) auto;align-items:end}
 .stage-controls .secondary{min-height:36px;padding:6px 9px;font-size:13px}
 .arena-looks{display:grid;grid-template-columns:repeat(5,minmax(55px,1fr));gap:5px;overflow-x:auto;padding:4px}
+.arena .arena-gift-button{color:#ffe0a2;border-color:#9a734c;background:#32251a}
+.arena .arena-gift-button:is(:hover,[aria-expanded=true]){background:#503720;border-color:#ffc976}
+.live-gift-shop,.gift-wallet{display:grid;gap:12px;min-width:0}
+.live-gift-balance,.gift-wallet-balance{display:flex;align-items:center;gap:8px;color:#ffe1a8}
+.live-gift-balance{justify-content:space-between}
+.live-gift-balance strong,.gift-back{display:inline-flex;align-items:center;gap:6px}
+.gift-back{justify-self:start}
+.gift-grid,.gift-packs,.gift-methods{display:grid;gap:7px;grid-template-columns:repeat(3,minmax(0,1fr))}
+.gift-option{display:grid;justify-items:center;gap:4px;padding:5px 4px 7px;border:1px solid #48574c;border-radius:11px;background:#111b16;text-align:center;min-width:0}
+.gift-option strong{font-size:12px;line-height:1.15}
+.gift-option small,.gift-packs small{color:#ffe1a8;font-size:11px}
+.gift-option:is(:hover,[aria-pressed=true]),.gift-wallet [aria-pressed=true]{border-color:#ffc97c;background:#30261a}
+.gift-art{display:block;width:min(100%,75px);aspect-ratio:1;border-radius:8px;background:#101a15 url('/gifts/mtaa-collection.webp') no-repeat;background-size:300% 200%}
+.gift-art[data-gift=matatu]{background-position:50% 0}
+.gift-art[data-gift=chai]{background-position:100% 0}
+.gift-art[data-gift=drums]{background-position:0 100%}
+.gift-art[data-gift=crown]{background-position:50% 100%}
+.gift-art[data-gift=comet]{background-position:100% 100%}
+.gift-summary,.gift-payment-status{display:grid;gap:6px}
+.gift-summary>span,.gift-payment-status p{font-size:13px;color:#d2ddd5}
+.gift-packs .secondary{display:grid;gap:2px;min-width:0;padding:7px 4px;text-align:center;font-size:13px}
+.gift-methods{grid-template-columns:repeat(2,minmax(0,1fr))}
+.gift-payment-status{background:#1a2720;border:1px solid #455b4a;border-radius:10px;padding:10px}
+.gift-payment-status a{text-decoration:none;color:inherit}
+.gift-purchases{display:grid;gap:4px}
+.gift-purchases h3{font-size:14px}
+.gift-purchases .row{justify-content:space-between}
+.gift-purchases small{text-transform:capitalize;color:var(--muted)}
+.live-gift-effect{
+  --gift-glow:#bffa72;
+  position:absolute;z-index:3;pointer-events:none;inset:14% 12% auto;display:grid;justify-items:center;
+  animation:gift-arrive 3s ease both;
+}
+.live-gift-effect[data-gift=matatu]{--gift-glow:#51e0df}
+.live-gift-effect[data-gift=chai]{--gift-glow:#ffbd8f}
+.live-gift-effect[data-gift=drums]{--gift-glow:#ff943a}
+.live-gift-effect[data-gift=crown]{--gift-glow:#ffd65b}
+.live-gift-effect[data-gift=comet]{--gift-glow:#b28bff}
+.live-gift-halo{width:clamp(105px,32vw,190px);aspect-ratio:1;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle,var(--gift-glow) 0%,#10191300 71%)}
+.live-gift-halo .gift-art{width:86%;border-radius:50%;box-shadow:0 0 28px var(--gift-glow);animation:gift-float 1.5s ease-in-out infinite alternate}
+.live-gift-effect[data-gift=matatu] .gift-art{animation-name:gift-cruise}
+.live-gift-effect[data-gift=drums] .gift-art{animation-name:gift-beat;animation-duration:.55s}
+.live-gift-effect[data-gift=comet] .gift-art{animation-name:gift-cruise;animation-direction:alternate-reverse}
+.live-gift-caption{display:grid;max-width:min(360px,100%);gap:2px;padding:7px 12px;border:1px solid var(--gift-glow);border-radius:12px;background:#101813ec;text-align:center;overflow-wrap:anywhere}
+.live-gift-caption strong{color:var(--gift-glow)}
+.live-gift-caption span{font-size:12px}
+@keyframes gift-arrive{0%{opacity:0;transform:translateY(18px) scale(.8)}15%,85%{opacity:1;transform:none}100%{opacity:0;transform:translateY(-12px)}}
+@keyframes gift-float{to{transform:translateY(-7px) rotate(4deg)}}
+@keyframes gift-cruise{from{transform:translateX(-16px) rotate(-8deg)}to{transform:translateX(16px) rotate(7deg)}}
+@keyframes gift-beat{to{transform:scale(1.1)}}
+@media(prefers-reduced-motion:reduce){.live-gift-effect,.live-gift-halo .gift-art{animation:none!important}}
 .arena-look{display:grid;align-content:start;gap:4px;padding:3px;text-align:center;min-width:0;border:1px solid #45574b;border-radius:9px;background:#1b2921}
 .arena-look:hover,.arena-look[aria-pressed=true]{border-color:var(--accent)}
 .arena-look strong{font-size:12px;line-height:1.15;padding:2px}

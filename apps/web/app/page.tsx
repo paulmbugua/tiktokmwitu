@@ -2,7 +2,7 @@
 'use client';
 
 import {
-  ArrowDown, ArrowDownToLine, ArrowUp, Bookmark, Check, ChevronRight, Clapperboard, Compass,
+  ArrowDown, ArrowDownToLine, ArrowUp, Bookmark, Check, ChevronRight, Clapperboard, Coins, Compass,
   Flag, Heart, House, Inbox as InboxIcon, MapPin, MessageCircle, Plus, Radio, Search,
   Send, Share2, Trash2, UploadCloud, UserRound, UsersRound, Volume2, VolumeX, X,
 } from 'lucide-react';
@@ -11,12 +11,15 @@ import { io } from 'socket.io-client';
 import dynamic from 'next/dynamic';
 import SignupNameFields from './signup-name-fields';
 import InstallApp from './install-app';
+import GiftWallet from './gift-wallet';
 import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Profile, type Video } from './client';
 
 type Tab = 'For You' | 'Following' | 'Discover';
+type WalletPanel = { kind: 'wallet'; purchaseId?: string; liveCode?: string };
 type Panel =
   | { kind: 'upload' | 'inbox' | 'account' | 'saved' }
-  | { kind: 'auth'; liveCode?: string }
+  | { kind: 'auth'; liveCode?: string; wallet?: WalletPanel }
+  | WalletPanel
   | { kind: 'live'; code?: string; resume?: boolean }
   | { kind: 'comments' | 'report'; video: Video }
   | { kind: 'profile' | 'chat'; handle: string };
@@ -117,6 +120,7 @@ function Clip({ video, root, muted, onMute, children, profile, manage }: {
 export default function Home() {
   const [tab, setTab] = useState<Tab>('For You');
   const [user, setUser] = useState<Person | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [mode, setMode] = useState<'login' | 'register'>('register');
   const [shared, setShared] = useState('');
@@ -143,8 +147,11 @@ export default function Home() {
     const id = params.get('v');
     if (id && /^[a-f0-9-]{36}$/i.test(id)) setShared(id);
     const liveCode = params.get('live');
-    if (liveCode) setPanel({ kind: 'live', code: liveCode.slice(0, 32) });
-    api<{ user: Person | null }>('/auth/me').then(result => setUser(result.user)).catch(() => undefined);
+    const topup = params.get('topup');
+    if (topup && /^[a-f0-9-]{36}$/i.test(topup)) {
+      setPanel({ kind: 'wallet', purchaseId: topup, liveCode: liveCode && /^[a-f0-9]{12}$/i.test(liveCode) ? liveCode : undefined });
+    } else if (liveCode) setPanel({ kind: 'live', code: liveCode.slice(0, 32) });
+    api<{ user: Person | null }>('/auth/me').then(result => setUser(result.user)).catch(() => undefined).finally(() => setSessionReady(true));
   }, []);
 
   useEffect(() => {
@@ -205,6 +212,12 @@ export default function Home() {
     window.history.replaceState(null, '', window.location.pathname);
   }
 
+  function clearCheckout() {
+    const url = new URL(window.location.href);
+    for (const key of ['topup', 'reference', 'trxref', 'live']) url.searchParams.delete(key);
+    window.history.replaceState(null, '', url);
+  }
+
   function choose(next: Tab) {
     clearLink();
     setExtra(null);
@@ -256,7 +269,7 @@ export default function Home() {
           const person = await send<Person>('/auth/' + mode, 'POST', Object.fromEntries(data));
           setUser(person);
           setExtra(null);
-          setPanel(panel.liveCode ? { kind: 'live', code: panel.liveCode, resume: true } : null);
+          setPanel(panel.wallet ?? (panel.liveCode ? { kind: 'live', code: panel.liveCode, resume: true } : null));
           refresh();
           break;
         }
@@ -327,7 +340,7 @@ export default function Home() {
     auth: mode === 'register' ? 'Join Tiktok mwitu' : 'Welcome back',
     upload: 'Post a video', comments: 'Comments', profile: 'Creator profile',
     inbox: 'Inbox', chat: panel && 'handle' in panel ? '@' + panel.handle : 'Chat',
-    report: 'Report video', account: 'Your account', live: 'Live broadcasts', saved: 'Saved videos',
+    report: 'Report video', account: 'Your account', live: 'Live broadcasts', saved: 'Saved videos', wallet: 'Coin wallet',
   };
   const feedError = shared ? linked?.error : feed?.error;
   const ready = shared ? !!linked : !!feed;
@@ -434,7 +447,9 @@ export default function Home() {
 
     {panel && <Dialog key={panel.kind} title={titles[panel.kind]} close={() => {
       if (pending) return;
+      if (panel.kind === 'auth' && panel.wallet) { open(panel.wallet); return; }
       if (panel.kind === 'auth' && panel.liveCode) { open({ kind: 'live', code: panel.liveCode }); return; }
+      if (panel.kind === 'wallet' && panel.purchaseId) clearCheckout();
       if (panel.kind === 'live') {
         const url = new URL(window.location.href);
         url.searchParams.delete('live');
@@ -520,7 +535,19 @@ export default function Home() {
           <button className="secondary" onClick={() => void logout()}>Log out</button>
         </div>
         <button className="secondary" onClick={() => open({ kind: 'saved' })}><Bookmark size={17} /> Saved videos</button>
+        <button className="secondary" onClick={() => open({ kind: 'wallet' })}><Coins size={17} /> Coin wallet</button>
       </div>}
+      {panel.kind === 'wallet' && <>
+        {!sessionReady ? <p role="status">Opening your wallet…</p>
+          : user ? <GiftWallet purchaseId={panel.purchaseId} liveCode={panel.liveCode} /> : <button className="primary" onClick={() => {
+          setMode('login');
+          open({ kind: 'auth', wallet: panel });
+        }}>Sign in to view wallet</button>}
+        {panel.liveCode && <button className="link" onClick={() => {
+          clearCheckout();
+          open({ kind: 'live', code: panel.liveCode, resume: true });
+        }}>Return to LIVE</button>}
+      </>}
       {panel.kind === 'saved' && user && <SavedVideos show={showVideo} />}
       {dialogError && <p className="error" role="alert">{dialogError}</p>}
     </Dialog>}
