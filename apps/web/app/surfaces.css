@@ -509,6 +509,7 @@ dialog:has(.arena) { background: #100c17; }
     padding: 0;
     border: 0;
     background: transparent;
+    color: var(--text);
     overflow: visible;
   }
   .top .mobile-brand .brand-icon { width: 32px; height: 32px; border-radius: 9px; }
