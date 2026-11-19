@@ -258,9 +258,6 @@ dialog:has(.arena) { background: #100c17; }
   justify-self: center;
   gap: 5px;
   padding: 8px 10px;
-  border: 1px solid #ffffff1d;
-  border-radius: 16px;
-  background: #21192cea;
 }
 .arena-docked .arena-media:is(.grid-stage,.spotlight-stage,.battle-stage) {
   left: var(--live-left);
@@ -272,8 +269,20 @@ dialog:has(.arena) { background: #100c17; }
   padding-right: 5px;
   scrollbar-color: #85679c transparent;
 }
-.arena-docked .live-message { padding: 4px 8px; margin-right: 4px; }
-.arena-docked .pinned { max-height: 2.8em; font-size: .8125rem; }
+.arena-docked .live-message {
+  padding: 4px 0;
+  margin-right: 4px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.arena-docked .pinned {
+  max-height: 2.8em;
+  font-size: .8125rem;
+  background: transparent;
+  border-inline-start: 2px solid var(--lavender);
+  border-radius: 0;
+}
 .live-chat-empty { place-self: center; margin: auto 0; padding: 6px; color: var(--muted); }
 .arena-docked .arena-tools { justify-self: center; }
 @media(max-height:540px) {
