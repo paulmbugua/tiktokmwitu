@@ -9,7 +9,7 @@ import { cleanText, cookie, db, handleSchema, identity, parse, requireUser, uuid
 import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle, stageSnapshot, type LiveRoom } from './live-store';
 import { recentGifts } from './gift-store';
 import { browserKey } from './commerce';
-import { checkInvite, claimInvite, normalizeInvite, type InvitePass } from './live-invites';
+import { checkInvite, claimInvite, isAudienceCode, normalizeInvite, type InvitePass } from './live-invites';
 
 const { LIVEKIT_URL: url, LIVEKIT_API_KEY: key, LIVEKIT_API_SECRET: secret } = process.env;
 const internalUrl = process.env.LIVEKIT_INTERNAL_URL || url;
@@ -211,8 +211,9 @@ export class LiveController {
       requireOpen(fresh);
       if (user) await member(client, fresh, user);
       if (!fresh.guest_access) throw new ForbiddenException('The host has turned off guest watching.');
-      await claimInvite(client, room.code, room.id, browserKey(req, res), user?.id);
-      return grant(fresh, { id: guestIdentityPrefix + randomUUID(), display_name: 'Guest viewer' }, true, room.code);
+      const browser=browserKey(req,res);
+      await claimInvite(client, room.code, room.id, browser, isAudienceCode(room.code)?undefined:user?.id);
+      return grant(fresh, { id: guestIdentityPrefix + (isAudienceCode(room.code)?browser:randomUUID()), display_name: 'Guest viewer' }, true, room.code);
     });
   }
 
@@ -234,8 +235,14 @@ export class LiveController {
   @Get('handoff/:code/state')
   async guestState(@Param('code') raw: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const room = await handoffRoom(raw);
-    if (!room.claim_browser) throw new ForbiddenException('Join with this invite to continue.');
-    checkInvite(room, browserKey(req, res), (await identity(req.cookies[cookie]))?.id);
+    const browser=browserKey(req,res);
+    if(isAudienceCode(room.code)){
+      if(!(await db.query('SELECT 1 FROM live_invite_viewers WHERE code=$1 AND browser_key=$2',[room.code,browser])).rowCount)
+        throw new ForbiddenException('Join with this invite to continue.');
+    }else{
+      if (!room.claim_browser) throw new ForbiddenException('Join with this invite to continue.');
+      checkInvite(room, browser, (await identity(req.cookies[cookie]))?.id);
+    }
     return lockedRoom(room.id, async (client, fresh) => {
       const { rows: [match] } = await client.query(`
         SELECT m.id,m.guest_id,m.status,m.starts_at,m.ends_at,m.host_score,m.guest_score,m.winner_id,m.outcome,

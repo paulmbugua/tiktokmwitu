@@ -161,7 +161,7 @@ export default function Home() {
     const topup = params.get('topup');
     const liveRoom=params.get('room')??'';
     if (topup && /^[a-f0-9-]{36}$/i.test(topup)) {
-      setPanel({ kind: 'wallet', purchaseId: topup, liveCode: liveCode && /^[a-f0-9]{16}$/i.test(liveCode) ? liveCode : undefined,
+      setPanel({ kind: 'wallet', purchaseId: topup, liveCode: liveCode && /^(?:\d{6}|[a-f0-9]{16})$/i.test(liveCode) ? liveCode : undefined,
         liveRoom:/^[a-f0-9-]{36}$/i.test(liveRoom)?liveRoom:undefined });
     } else if (liveCode) setPanel({ kind: 'live', code: liveCode.slice(0, 32) });
     api<{ user: Person | null }>('/auth/me').then(result => setUser(result.user)).catch(() => undefined).finally(() => setSessionReady(true));
@@ -489,7 +489,7 @@ export default function Home() {
       }
       setPanel(null);
     }}>
-      {panel.kind === 'live' && <Live user={user} initialCode={panel.code} resume={panel.resume} roomId={panel.roomId}
+      {panel.kind === 'live' && <Live user={user} sessionReady={sessionReady} initialCode={panel.code} resume={panel.resume} roomId={panel.roomId}
         signIn={liveCode => open({ kind: 'auth', liveCode })} />}
       {panel.kind === 'auth' && <form onSubmit={submit}>
         {panel.liveCode && <p className="hint">After signing in, you’ll return to the LIVE.</p>}

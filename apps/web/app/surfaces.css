@@ -166,6 +166,9 @@ h2 { font-size: clamp(1.25rem, 3vw, 1.6rem); line-height: 1.18; }
 .bubble { border-radius: 17px 17px 17px 5px; background: #3a2d49; }
 .bubble.mine { border-radius: 17px 17px 5px 17px; background: #3b4930; }
 .commerce-heading { flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+.dialog-inner .live-code-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; margin-block: 0 12px; }
+.live-code-form input, .live-code-digits { font-variant-numeric: tabular-nums; }
+.live-code-digits { color: var(--accent); font-size: 1.4rem; letter-spacing: .12em; }
 .invite-pass, .promote-estimate, .sponsored-live, .gift-payment-status, .live-handoff {
   border-radius: 15px;
   padding: 12px;

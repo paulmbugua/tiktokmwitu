@@ -25,7 +25,7 @@ import { VideosController } from './videos';
 import { giftSchema } from './gift-store';
 import { GiftPaymentsController, reconcileTopups } from './gift-payments';
 import { LiveGiftsController } from './live-gifts';
-import { inviteSchema, LiveInvitesController } from './live-invites';
+import { inviteSchema, LiveInvitesController, sweepInviteCodes } from './live-invites';
 import { PromoteController, promotionSchema, settlePromotions } from './promote';
 
 @Controller()
@@ -145,6 +145,8 @@ async function start() {
   liveSweep.unref();
   const paymentSweep = setInterval(() => void reconcileTopups(), 4000);
   paymentSweep.unref();
+  const inviteSweep=setInterval(()=>void sweepInviteCodes().catch(error=>console.error('LIVE invite cleanup failed',error)),3600000);
+  inviteSweep.unref();
   const promotionSweep = setInterval(() => void settlePromotions(), 12000);
   promotionSweep.unref();
   if (useR2) {

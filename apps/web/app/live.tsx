@@ -10,10 +10,11 @@ import { promotionAction, promotionEvent, usePlacementView, type Placement } fro
 type Listing = { enabled: boolean; rooms: Array<Person & { viewers: number; host_id: string }> };
 type RoomPreview = Pick<Person, 'id' | 'handle' | 'display_name'> & { guestAccess: boolean };
 const normalize = (value: string) => value.trim().replace(/[\s-]+/g, '').toUpperCase();
-const validCode = /^[0-9A-F]{16}$/;
+const shortCode = /^\d{6}$/;
+const validCode = /^(?:\d{6}|[0-9A-F]{16})$/;
 
-export default function Live({ user, initialCode, resume, roomId, signIn }: {
-  user: Person | null; initialCode?: string; resume?: boolean; roomId?: string; signIn: (code?: string) => void;
+export default function Live({ user, sessionReady, initialCode, resume, roomId, signIn }: {
+  user: Person | null; sessionReady: boolean; initialCode?: string; resume?: boolean; roomId?: string; signIn: (code?: string) => void;
 }) {
   const [revision, setRevision] = useState(0);
   const [grant, setGrant] = useState<Grant | null>(null);
@@ -22,6 +23,7 @@ export default function Live({ user, initialCode, resume, roomId, signIn }: {
   const [code, setCode] = useState(normalize(initialCode ?? ''));
   const [codeInput, setCodeInput] = useState(initialCode ?? '');
   const resumed = useRef(false);
+  const autoJoined = useRef('');
   const listing = useData<Listing>(grant || code ? null : '/live', revision);
   const placement=useData<Placement|null>(!grant&&!code?'/promote/placement?surface=live':null)?.data;
   const promoted=listing?.data?.rooms.find(room=>room.id===placement?.liveId);
@@ -44,22 +46,30 @@ export default function Live({ user, initialCode, resume, roomId, signIn }: {
     finally { setPending(false); }
   }, [signIn, user]);
 
-  async function guestWatch() {
+  const guestWatch = useCallback(async () => {
     setPending(true);
     setError('');
     try { setGrant(await send<Grant>('/live/handoff/' + code + '/watch', 'POST')); }
     catch (error) { setError((error as Error).message); }
     finally { setPending(false); }
-  }
+  }, [code]);
 
   useEffect(() => {
-    if (!resume || resumed.current || !user || (!roomId && (!sharedRoom || !code))) return;
+    if (!sessionReady || !shortCode.test(code) || !sharedRoom || grant || autoJoined.current===code) return;
+    autoJoined.current=code;
+    if (user) void join(sharedRoom.id,code);
+    else if (sharedRoom.guestAccess) void guestWatch();
+  }, [code, grant, guestWatch, join, sessionReady, sharedRoom, user]);
+
+  useEffect(() => {
+    if (!resume || resumed.current || !user || shortCode.test(code) || (!roomId && (!sharedRoom || !code))) return;
     resumed.current = true;
     void join(roomId ?? sharedRoom?.id, code || undefined);
   }, [code, join, sharedRoom, resume, roomId, user]);
 
   function browse() {
     setGrant(null);
+    autoJoined.current='';
     setCode('');
     setCodeInput('');
     setError('');
@@ -69,39 +79,49 @@ export default function Live({ user, initialCode, resume, roomId, signIn }: {
     window.history.replaceState(null, '', url);
   }
 
+  function findCode(value: string) {
+    const next=normalize(value);
+    if (!validCode.test(next)) {setError('Enter the 6-digit LIVE code.');return;}
+    setError('');
+    setCode(next);
+    const url=new URL(window.location.href);
+    url.searchParams.set('live',next);
+    window.history.replaceState(null,'',url);
+  }
+
   if (grant && (user || grant.guest)) return <Broadcast key={grant.id} grant={grant} user={grant.guest ? null : user}
     signIn={() => signIn(grant.shareCode)} leave={browse} />;
   if (code) return <section className="live-handoff" aria-label="LIVE invitation">
     <h3>{sharedRoom ? sharedRoom.display_name + ' is live' : 'Join a LIVE'}</h3>
     {sharedRoom && <p className="hint">@{sharedRoom.handle} · Code {code}</p>}
-    {!validCode.test(code) && <p className="error">Enter a 16-character LIVE code.</p>}
+    {!validCode.test(code) && <p className="error">Enter the 6-digit LIVE code.</p>}
     {validCode.test(code) && !preview && <p role="status">Finding this LIVE…</p>}
     {preview?.error && <p className="error" role="alert">{preview.error}</p>}
     {error && <p className="error" role="alert">{error}</p>}
     <div className="arena-buttons">
-      {sharedRoom?.guestAccess && !user && <button className="primary" disabled={pending} onClick={() => void guestWatch()}>
+      {sessionReady && sharedRoom?.guestAccess && !user && (!shortCode.test(code) || error) && <button className="primary" disabled={pending} onClick={() => void guestWatch()}>
         <Radio size={17} /> {pending ? 'Joining…' : 'Watch as guest'}
       </button>}
-      {sharedRoom && <button className={!user && sharedRoom.guestAccess ? 'secondary' : 'primary'} disabled={pending} onClick={() => void join(sharedRoom.id, code)}>
+      {sessionReady && sharedRoom && (!shortCode.test(code) || error || (!user && !sharedRoom.guestAccess)) && <button className={!user && sharedRoom.guestAccess ? 'secondary' : 'primary'} disabled={pending} onClick={() => void join(sharedRoom.id, code)}>
         <Radio size={17} /> {pending ? 'Joining…' : !user ? 'Sign in to join LIVE' : user.handle === sharedRoom.handle ? 'Rejoin as host' : 'Join LIVE'}
       </button>}
-      <button className="secondary" disabled={pending} onClick={browse}>Browse LIVE</button>
+      {pending&&shortCode.test(code)&&<p role="status">Joining {sharedRoom?.display_name}…</p>}
+      <button className="secondary" disabled={pending} onClick={browse}>{shortCode.test(code)?'Enter a different code':'Browse LIVE'}</button>
     </div>
   </section>;
   return <>
-    <form className="inline" onSubmit={event => {
+    <form className="live-code-form" onSubmit={event => {
       event.preventDefault();
-      const next = normalize(codeInput);
-      if (!validCode.test(next)) { setError('Enter a 16-character LIVE code.'); return; }
-      setError('');
-      setCode(next);
-      const url = new URL(window.location.href);
-      url.searchParams.set('live', next);
-      window.history.replaceState(null, '', url);
+      findCode(codeInput);
     }}>
-      <input aria-label="LIVE room code" placeholder="Enter a LIVE code" value={codeInput} onChange={event => setCodeInput(event.target.value)}
-        maxLength={22} autoCapitalize="characters" autoCorrect="off" spellCheck={false} required />
-      <button className="secondary" disabled={pending}><KeyRound size={16} /> Find LIVE</button>
+      <label>Have a LIVE code?
+        <input aria-label="LIVE room code" placeholder="6-digit code" value={codeInput} onChange={event => {
+          const value=event.currentTarget.value;
+          setCodeInput(value);
+          if(validCode.test(normalize(value)))findCode(value);
+        }} inputMode="numeric" maxLength={22} autoCapitalize="characters" autoCorrect="off" spellCheck={false} required />
+      </label>
+      <button className="primary" disabled={pending}><KeyRound size={16} /> Join LIVE</button>
     </form>
     <div className="list">
       {promoted&&placement&&<div className="sponsored-live" ref={setAdRef}>

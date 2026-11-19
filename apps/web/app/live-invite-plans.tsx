@@ -33,15 +33,18 @@ export default function LiveInvitePlans({ roomId }: {roomId?:string}) {
       <p className="hint">Daily allowance resets at midnight in Kenya. Plan ends {new Date(data.plan.ends_at).toLocaleString('en-KE',{timeZone:'Africa/Nairobi'})} EAT.</p>
       {roomId ? <button className="primary" disabled={busy||data.used>=data.plan.daily_limit} onClick={()=>void act('create','/live-invites/'+roomId+'/create',{})}>Create invite code</button> : <p className="hint">Go LIVE to create your invite codes.</p>}
       {passes?.data?.map(pass=><div className="commerce-heading invite-pass" key={pass.code}>
-        <div><strong>{pass.code}</strong><p className="hint">{pass.claimed?'Claimed':'Ready to share'}</p></div>
-        <button className="secondary" onClick={async()=>{
-          const link=new URL('/?live='+pass.code,location.origin).href;
-          try{await navigator.clipboard.writeText(link);setMessage('Invite link copied.');}
-          catch{setMessage(link);}
-        }}>Copy link</button>
+        <div><strong className="live-code-digits">{pass.code.length===6 ? pass.code.slice(0,3)+' '+pass.code.slice(3) : pass.code}</strong>
+          <p className="hint">{pass.claimed?'Claimed':'Ready to share'}</p></div>
+        <div className="arena-buttons">
+          {(['code','link'] as const).map(action=><button className="secondary" key={action} onClick={async()=>{
+            const value=action==='code'?pass.code:new URL('/?live='+pass.code,location.origin).href;
+            try{await navigator.clipboard.writeText(value);setMessage(action==='code'?'Invite code copied.':'Invite link copied.');}
+            catch{setMessage(value);}
+          }}>{action==='code'?'Copy code':'Copy link'}</button>)}
+        </div>
       </div>)}
     </> : <>
-      <p className="hint">Each code admits one viewer. They can watch without an account when guest watching is on.</p>
+      <p className="hint">Read one six-digit code to your audience. They can watch without an account when guest watching is on.</p>
       {data?.plans.map(plan=><button key={plan.coins} className="secondary" disabled={busy||data.balance<plan.coins}
         onClick={()=>void act(String(plan.coins),'/live-invites/purchase',{coins:plan.coins})}>{plan.limit} invites/day · {plan.coins.toLocaleString()} coins/week</button>)}
     </>}

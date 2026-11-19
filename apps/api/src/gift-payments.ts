@@ -6,13 +6,14 @@ import { z } from 'zod';
 import { db, parse, requireUser, uuid } from './infra';
 import { coinBalance, coinPacks, creditTopup, giftCatalog, type Topup } from './gift-store';
 import { mpesaPhoneDigest, paymentMethods, PaymentRejected, startCard, startMpesa, validCardWebhook, validMpesaCallback, verifyTopup } from './gift-providers';
+import { inviteCodePattern } from './live-invites';
 
 const phoneSchema = z.string().trim().max(18).transform(value => value.replace(/[\s-]/g, '').replace(/^\+/, '').replace(/^0/, '254'))
   .refine(value => /^254[17]\d{8}$/.test(value), 'Enter a Kenyan mobile number.');
 const topupFields = {
   pack: z.enum(['100', '300', '700', '1000', '2000']),
   requestId: z.uuid(),
-  liveCode: z.string().regex(/^[0-9A-F]{16}$/).optional(),
+  liveCode: z.string().regex(inviteCodePattern).optional(),
   liveRoom: z.uuid().optional(),
 };
 const topupInput = z.discriminatedUnion('method', [

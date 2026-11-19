@@ -1,4 +1,5 @@
-import { Body, ConflictException, Controller, ForbiddenException, Get, NotFoundException, Param, Post, Req } from '@nestjs/common';
+import { Body, ConflictException, Controller, ForbiddenException, Get, NotFoundException, Param, Post, Req, ServiceUnavailableException } from '@nestjs/common';
+import { randomInt } from 'node:crypto';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import type { PoolClient } from 'pg';
@@ -26,14 +27,25 @@ CREATE TABLE IF NOT EXISTS live_invite_passes (
   UNIQUE(plan_id,request_id)
 );
 CREATE INDEX IF NOT EXISTS live_invite_daily ON live_invite_passes(plan_id,created_day);
+CREATE TABLE IF NOT EXISTS live_invite_viewers (
+  code text NOT NULL REFERENCES live_invite_passes ON DELETE CASCADE,
+  browser_key text NOT NULL,
+  PRIMARY KEY(code,browser_key)
+);
+CREATE INDEX IF NOT EXISTS live_invite_expiration ON live_invite_passes(expires_at);
 `;
 
 type Plan = { id: string; coins: number; daily_limit: number; ends_at: Date };
 export type InvitePass = { code: string; room_id: string; claim_browser: string | null; claim_user: string | null; expires_at: Date };
 const activePlanSql = 'SELECT * FROM live_invite_plans WHERE user_id=$1 AND ends_at>now() ORDER BY ends_at DESC LIMIT 1';
+export const isAudienceCode = (code: string) => /^\d{6}$/.test(code);
 
 export function checkInvite(pass: InvitePass | undefined, browser: string, userId?: string) {
   if (!pass) throw new NotFoundException('This LIVE invite is unavailable.');
+  if (isAudienceCode(pass.code)) {
+    if (pass.expires_at <= new Date()) throw new NotFoundException('This LIVE invite has expired.');
+    return pass;
+  }
   if (pass.claim_browser) {
     if ((userId && pass.claim_user && userId !== pass.claim_user) ||
         (pass.claim_browser !== browser && (!userId || pass.claim_user !== userId))) {
@@ -47,11 +59,23 @@ export async function claimInvite(client: PoolClient, code: string, roomId: stri
   const { rows: [row] } = await client.query<InvitePass>(
     'SELECT * FROM live_invite_passes WHERE code=$1 AND room_id=$2 FOR UPDATE', [code, roomId]);
   const pass = checkInvite(row, browser, userId);
+  if (isAudienceCode(pass.code)) {
+    if (!userId) await client.query('INSERT INTO live_invite_viewers(code,browser_key) VALUES($1,$2) ON CONFLICT DO NOTHING', [code, browser]);
+    return;
+  }
   await client.query(`UPDATE live_invite_passes SET claim_browser=COALESCE(claim_browser,$2),
     claim_user=COALESCE(claim_user,$3),claimed_at=COALESCE(claimed_at,now()) WHERE code=$1`, [pass.code, browser, userId ?? null]);
 }
 
-export const normalizeInvite = (value: string) => parse(z.string().trim().toUpperCase().regex(/^[A-F0-9]{16}$/, 'Enter a 16-character LIVE invite.'), value);
+export const inviteCodePattern = /^(?:\d{6}|[A-F0-9]{16})$/;
+export const normalizeInvite = (value: string) => parse(z.string().trim().toUpperCase()
+  .regex(inviteCodePattern, 'Enter the 6-digit LIVE code.'), value);
+
+export async function sweepInviteCodes() {
+  await db.query(`
+    DELETE FROM live_invite_passes p USING live_rooms r
+    WHERE p.room_id=r.id AND r.ended_at IS NOT NULL AND p.expires_at<now()-interval '30 days'`);
+}
 
 @Controller('live-invites')
 export class LiveInvitesController {
@@ -104,10 +128,15 @@ export class LiveInvitesController {
       const { rows: [{ count }] } = await client.query<{ count: number }>(
         "SELECT count(*)::int FROM live_invite_passes WHERE plan_id=$1 AND created_day=(now() AT TIME ZONE 'Africa/Nairobi')::date", [plan.id]);
       if (count >= plan.daily_limit) throw new ConflictException('Today’s invite limit has been reached. It resets at midnight in Kenya.');
-      const { rows: [invite] } = await client.query<InvitePass>(`
-        INSERT INTO live_invite_passes(room_id,plan_id,request_id,expires_at)
-        VALUES($1,$2,$3,LEAST($4,now()+interval '24 hours')) RETURNING *`, [room.id, plan.id, requestId, plan.ends_at]);
-      return { code: invite.code, expiresAt: invite.expires_at };
+      for (let attempt=0;attempt<12;attempt++) {
+        const code=String(randomInt(100000,1000000));
+        const { rows: [invite] } = await client.query<InvitePass>(`
+          INSERT INTO live_invite_passes(code,room_id,plan_id,request_id,expires_at)
+          VALUES($1,$2,$3,$4,LEAST($5,now()+interval '24 hours'))
+          ON CONFLICT(code) DO NOTHING RETURNING code,expires_at`, [code,room.id,plan.id,requestId,plan.ends_at]);
+        if(invite)return {code:invite.code,expiresAt:invite.expires_at};
+      }
+      throw new ServiceUnavailableException('Could not allocate a LIVE code. Try again.');
     });
   }
 
