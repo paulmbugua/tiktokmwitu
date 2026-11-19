@@ -58,7 +58,7 @@ function page(head, { title, description, path, content, image = brandImage, ima
 
 async function api(path) {
   const response = await fetch(apiOrigin + '/api' + path, {
-    headers: { Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(7000),
+    headers: { Accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(7000),
   });
   if (response.status === 404 && path.startsWith('/videos/')) return null;
   if (!response.ok) throw new Error('Discovery API returned ' + response.status);
