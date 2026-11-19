@@ -1,0 +1,16 @@
+@font-face {
+  font-family: 'Caveat Brush';
+  src: url('/fonts/caveat-brush-latin.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+.mwitu-wordmark {
+  font-family: 'Caveat Brush', 'Segoe Print', cursive;
+  font-size: 1.75rem;
+  font-weight: 400;
+  letter-spacing: -.025em;
+  line-height: 1;
+  white-space: nowrap;
+}
+.mwitu-wordmark strong { color: #d3fc77; font-weight: inherit; }

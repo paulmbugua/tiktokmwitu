@@ -469,7 +469,7 @@ export default function Home() {
     <aside className="sidebar">
       <button className="brand" onClick={() => choose('For You')} aria-label="Tiktok mwitu home">
         <span className="brand-icon"><img src="/icons/mwitu-192.png" alt="" width="40" height="40" /></span>
-        <span>Tiktok <strong>mwitu</strong></span>
+        <span className="mwitu-wordmark">TikTok <strong>Mwitu</strong></span>
       </button>
       <nav aria-label="Main menu">
         {navigation.map(({ name, icon: Icon }) => <button key={name} aria-label={name} className={tab === name && !shared ? 'selected' : ''}
@@ -487,7 +487,10 @@ export default function Home() {
 
     <main className="workspace">
       <header className="top">
-        <button className="mobile-brand" onClick={() => choose('For You')} aria-label="Home"><img src="/icons/mwitu-192.png" alt="" width="34" height="34" /></button>
+        <button className="mobile-brand" onClick={() => choose('For You')} aria-label="Home">
+          <span className="brand-icon"><img src="/icons/mwitu-192.png" alt="" width="34" height="34" /></span>
+          <span className="mwitu-wordmark">TikTok <strong>Mwitu</strong></span>
+        </button>
         <div className="top-tabs" aria-label="Feed">
           {navigation.map(({ name }) => <button className={tab === name && !shared ? 'current' : ''} key={name} onClick={() => choose(name)}>{name}</button>)}
         </div>

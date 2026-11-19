@@ -50,8 +50,8 @@ function page(head, { title, description, path, content, image = brandImage, ima
       og('locale', 'en_KE') + og('type', video ? 'video.other' : 'website') + og('image', image) + og('image:alt', imageAlt) +
       meta('twitter:card', 'summary') + meta('twitter:title', title) + meta('twitter:description', description) +
       meta('twitter:image', image) + meta('twitter:image:alt', imageAlt) : '') +
-    '<link rel="icon" href="/favicon.ico" sizes="any"><link rel="stylesheet" href="/discovery.css">' + markup +
-    '</head><body><header class="site-header"><a class="brand" href="/"><img width="36" height="36" src="/icons/mwitu-192.png" alt=""> ' + brand +
+    '<link rel="icon" href="/icons/mwitu-note.svg" type="image/svg+xml"><link rel="stylesheet" href="/brand.css"><link rel="stylesheet" href="/discovery.css">' + markup +
+    '</head><body><header class="site-header"><a class="brand" href="/"><img width="36" height="36" src="/icons/mwitu-192.png" alt=""><span class="mwitu-wordmark">TikTok <strong>Mwitu</strong></span>' +
     '</a><nav aria-label="Explore"><a href="/videos">Videos</a><a href="/live">LIVE</a></nav></header>' +
     '<main>' + content + '</main></body></html>', head, 'text/html', status);
 }
