@@ -4,8 +4,8 @@ import { handleMedia, readRange } from './media.mjs';
 const publicHost = 'tiktokmwitu.co.ke';
 const adminHost = 'admin.tiktokmwitu.co.ke';
 const apiHost = 'https://api.tiktokmwitu.co.ke';
-const androidFile = 'tiktok-mwitu-1.0.1.apk';
-const androidReleases = new Set([androidFile, 'tiktok-mwitu-1.0.0.apk']);
+const androidFile = 'tiktok-mwitu-1.0.2.apk';
+const androidReleases = new Set([androidFile, 'tiktok-mwitu-1.0.1.apk', 'tiktok-mwitu-1.0.0.apk']);
 const liveInvitePath = /^\/join\/(\d{6}|[0-9A-F]{16})\/?$/i;
 const mediaPath = /^\/media\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.(mp4|jpg)$/;
 
