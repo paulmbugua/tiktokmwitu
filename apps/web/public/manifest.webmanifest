@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "Tiktok mwitu",
+  "short_name": "Tiktok mwitu",
+  "description": "Backstreet short videos and LIVE from Kenyan creators.",
+  "lang": "en-KE",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d1010",
+  "theme_color": "#0d1010",
+  "icons": [
+    { "src": "/icons/mwitu-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/mwitu-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/mwitu-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

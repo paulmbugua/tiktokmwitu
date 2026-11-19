@@ -13,6 +13,8 @@ h1,h2,h3,p{margin:0}
 .brand{display:flex;align-items:center;gap:10px;text-align:left;white-space:nowrap;font-size:20px;font-weight:750;letter-spacing:-.85px;margin:0 0 21px 5px}
 .brand strong{color:var(--accent)}
 .brand-icon,.mobile-brand{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--accent);color:#17200e}
+.brand-icon,.mobile-brand{overflow:hidden;background:#101713;border:1px solid #405143}
+.brand-icon img,.mobile-brand img{display:block;width:100%;height:100%;object-fit:cover}
 .sidebar nav{display:grid;gap:5px}
 .sidebar nav button,.account{position:relative;display:flex;align-items:center;gap:13px;min-height:48px;padding:10px 13px;border-radius:12px;text-align:left;font-weight:650;color:var(--muted)}
 .sidebar nav button:hover,.account:hover{background:#1b221e;color:var(--text)}
@@ -32,6 +34,17 @@ h1,h2,h3,p{margin:0}
 .top-tabs button{position:relative;color:var(--muted);font-weight:700}
 .top-tabs button.current{color:var(--text)}
 .top-tabs button.current:after{position:absolute;content:"";bottom:0;left:0;right:0;height:3px;background:var(--accent);border-radius:4px 4px 0 0}
+.top-tools{grid-column:3;justify-self:end;display:flex;align-items:center}
+.install-shortcut{color:var(--accent)}
+.install-card{position:fixed;z-index:6;right:max(14px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));width:min(374px,calc(100% - 28px));display:grid;gap:13px;padding:14px;background:#152019;border:1px solid #516348;border-radius:15px;box-shadow:0 12px 36px #050a07b0}
+.install-heading{display:flex;align-items:center;gap:10px;padding-right:25px}
+.install-heading img{flex:none;border-radius:11px;border:1px solid #53604c}
+.install-heading h2{font-size:17px}
+.install-heading p,.install-steps{font-size:13px;color:#c1cfc4}
+.install-steps{line-height:1.55}
+.install-close{position:absolute;top:5px;right:5px;width:36px;height:36px}
+.install-actions{display:flex;align-items:center;gap:8px}
+.install-actions .primary{min-height:36px;padding:6px 12px}
 .mobile-brand,.top-account,.mobile-nav{display:none}
 .search{display:flex;align-items:center;gap:10px;margin:12px auto 0;max-width:580px;width:calc(100% - 32px);padding:0 0 0 13px;color:var(--muted);border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .search input{min-width:0;flex:1;border:0;background:transparent;color:var(--text);padding:8px 2px}
@@ -251,6 +264,8 @@ dialog:has(.arena){inset:0;margin:0;border:0;border-radius:0;width:100%;max-widt
   .top-tabs{gap:14px;font-size:13px}
   .mobile-brand{display:grid;width:34px;height:34px;border-radius:9px}
   .top-account{display:grid;justify-self:end}
+  .top-tools>.icon{width:35px;height:38px}
+  .install-card{bottom:calc(62px + env(safe-area-inset-bottom))}
   .mobile-nav{display:flex;justify-content:space-around;align-items:center;border-top:1px solid var(--line);background:#101412;padding:3px 3px calc(3px + env(safe-area-inset-bottom))}
   .mobile-nav button{position:relative;min-width:51px;min-height:47px;border-radius:8px;display:grid;justify-items:center;align-content:center;font-size:10px;color:var(--muted)}
   .mobile-nav .unread{position:absolute;right:8px;top:5px}

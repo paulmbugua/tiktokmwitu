@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { io } from 'socket.io-client';
 import dynamic from 'next/dynamic';
 import SignupNameFields from './signup-name-fields';
+import InstallApp from './install-app';
 import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Profile, type Video } from './client';
 
 type Tab = 'For You' | 'Following' | 'Discover';
@@ -339,7 +340,7 @@ export default function Home() {
   return <div className="shell">
     <aside className="sidebar">
       <button className="brand" onClick={() => choose('For You')} aria-label="Tiktok mwitu home">
-        <span className="brand-icon"><Clapperboard size={24} strokeWidth={2.6} /></span>
+        <span className="brand-icon"><img src="/icons/mwitu-192.png" alt="" width="40" height="40" /></span>
         <span>Tiktok <strong>mwitu</strong></span>
       </button>
       <nav aria-label="Main menu">
@@ -356,11 +357,14 @@ export default function Home() {
 
     <main className="workspace">
       <header className="top">
-        <button className="mobile-brand" onClick={() => choose('For You')} aria-label="Home"><Clapperboard size={24} /></button>
+        <button className="mobile-brand" onClick={() => choose('For You')} aria-label="Home"><img src="/icons/mwitu-192.png" alt="" width="34" height="34" /></button>
         <div className="top-tabs" aria-label="Feed">
           {navigation.map(({ name }) => <button className={tab === name && !shared ? 'current' : ''} key={name} onClick={() => choose(name)}>{name}</button>)}
         </div>
-        <button className="top-account icon" onClick={() => open({ kind: user ? 'account' : 'auth' })} aria-label="Account"><UserRound size={19} /></button>
+        <div className="top-tools">
+          <InstallApp interrupted={!!panel} />
+          <button className="top-account icon" onClick={() => open({ kind: user ? 'account' : 'auth' })} aria-label="Account"><UserRound size={19} /></button>
+        </div>
       </header>
       {tab === 'Discover' && !shared && <form className="search" onSubmit={event => {
         event.preventDefault(); setExtra(null); setQuery(search.trim()); root?.scrollTo(0, 0);
