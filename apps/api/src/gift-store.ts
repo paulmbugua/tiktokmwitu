@@ -14,6 +14,8 @@ export const coinPacks = [
   { id: '100', coins: 100, kes: 100 },
   { id: '300', coins: 300, kes: 300 },
   { id: '700', coins: 700, kes: 700 },
+  { id: '1000', coins: 1000, kes: 1000 },
+  { id: '2000', coins: 2000, kes: 2000 },
 ] as const;
 
 export const giftSchema = `
@@ -54,6 +56,8 @@ CREATE TABLE IF NOT EXISTS live_gifts (
 CREATE INDEX IF NOT EXISTS live_gifts_recent ON live_gifts(room_id,id DESC);
 CREATE INDEX IF NOT EXISTS live_gifts_sent ON live_gifts(sender_id,id DESC);
 CREATE INDEX IF NOT EXISTS live_gifts_received ON live_gifts(recipient_id,id DESC);
+ALTER TABLE live_gifts ADD COLUMN IF NOT EXISTS platform_minor integer CHECK(platform_minor IS NULL OR platform_minor=coins*15);
+ALTER TABLE live_gifts ADD COLUMN IF NOT EXISTS performer_minor integer GENERATED ALWAYS AS (coins*100-platform_minor) STORED;
 `;
 
 export type Topup = {

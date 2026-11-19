@@ -13,6 +13,7 @@ export type Wallet = {
   balance: number; gifts: Gift[]; packs: { id: string; coins: number; kes: number }[];
   methods: Record<Purchase['method'], boolean>; purchases: Purchase[];
   history: { id: string; gift_id: string; coins: number; sent: boolean; handle: string }[];
+  earnedMinor?: string;
 };
 type PurchaseStatus = { payment: Purchase; balance: number };
 const amount = new Intl.NumberFormat('en-KE');
@@ -21,7 +22,7 @@ export function GiftArt({ id }: { id: string }) {
   return <span aria-hidden="true" className="gift-art" data-gift={id} />;
 }
 
-export default function GiftWallet({ liveCode, purchaseId }: { liveCode?: string; purchaseId?: string }) {
+export default function GiftWallet({ liveCode, liveRoom, purchaseId }: { liveCode?: string; liveRoom?:string; purchaseId?: string }) {
   const [revision, setRevision] = useState(0);
   const wallet = useData<Wallet>('/gifts/wallet', revision);
   const [pack, setPack] = useState('100');
@@ -62,6 +63,7 @@ export default function GiftWallet({ liveCode, purchaseId }: { liveCode?: string
   return <div className="gift-wallet">
     <div className="gift-wallet-balance"><Coins size={21} /><strong>{amount.format(
       active?.payment.status === 'paid' ? active.balance : wallet?.data?.balance ?? 0)} coins</strong></div>
+    {!!Number(wallet?.data?.earnedMinor)&&<p className="hint">Gift earnings · {(Number(wallet?.data?.earnedMinor)/100).toLocaleString('en-KE',{maximumFractionDigits:2})} coins after the 15% platform share</p>}
     {selected && !active && <p role="status">Checking your purchase…</p>}
     {active && <section className="gift-payment-status" aria-label="Purchase status">
       <strong>{active.payment.method === 'card' ? 'Card' : 'M-Pesa'} · KSh {active.payment.kes}</strong>
@@ -87,7 +89,7 @@ export default function GiftWallet({ liveCode, purchaseId }: { liveCode?: string
       setError('');
       try {
         const result = await send<Purchase>('/gifts/topups', 'POST', {
-          method: paymentMethod, pack, liveCode, requestId: request.current.id,
+          method: paymentMethod, pack, liveCode, liveRoom, requestId: request.current.id,
           ...(paymentMethod === 'mpesa' ? { phone: contact } : { email: contact }),
         });
         request.current = null;

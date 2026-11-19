@@ -24,10 +24,11 @@ async function request<T>(url: string, authorization: string, body?: object) {
   return { status: response.status, body: await response.json() as T };
 }
 
-export async function startCard(payment: Topup, email: string, liveCode?: string) {
+export async function startCard(payment: Topup, email: string, liveCode?: string, liveRoom?: string) {
   const callback = new URL('/', origin);
   callback.searchParams.set('topup', payment.id);
   if (liveCode) callback.searchParams.set('live', liveCode);
+  else if (liveRoom) callback.searchParams.set('room', liveRoom);
   const { status, body } = await request<{ status?: boolean; data?: { authorization_url?: string } }>(
     'https://api.paystack.co/transaction/initialize', 'Bearer ' + PAYSTACK_SECRET_KEY, {
       email, amount: String(payment.amount_kes * 100), currency: 'KES', channels: ['card'],

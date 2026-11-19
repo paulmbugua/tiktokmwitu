@@ -80,13 +80,17 @@ Open **Moderation** inside a broadcast to appoint room moderators, turn viewer c
 
 ### Bring an audience to Tiktok mwitu
 
-Start a LIVE on Tiktok mwitu and open **Share LIVE**. Share the link wherever your audience can open it, or show the 12-character code and tell viewers to enter it in Tiktok mwitu’s LIVE menu. Visitors can select **Watch as guest** to see the video and 1v1 scoreboard without creating an account. Sign-in is required to read or send room chat, vote or take a challenger seat. Sign-in or signup returns viewers directly to the same LIVE. Links and codes stop working when the broadcast ends. The host can turn off guest watching in **Moderation**, which disconnects current guests and stops new guest admissions.
+Start a LIVE and open **Share LIVE**. Activate a seven-day invite plan with 1,000 coins for five codes per day or 2,000 coins for ten codes per day. Codes are 16 characters and each can be claimed by one viewer. Unclaimed codes expire after 24 hours or when the plan ends, whichever comes first. Daily limits reset at midnight in Nairobi. Visitors can select **Watch as guest** without creating an account if guest watching is enabled. Public LIVE discovery remains available to signed-in viewers.
 
-For a 1v1 handoff, reserve the challenger’s seat using their Tiktok mwitu handle before sharing. The reservation lasts five minutes. The invited account can accept and enable its camera on arrival. Everyone else joins as a viewer. TikTok LIVE participants, chat, scores, gifts and stream state aren’t transferred.
+For a 1v1 handoff, reserve the challenger’s seat using their Tiktok mwitu handle before sharing. The reservation lasts five minutes. The invited account can accept and enable its camera on arrival. Everyone else joins as a viewer.
 
 ## LIVE gifting and payment setup
 
-Signed-in viewers can send virtual gifts to the host, an accepted guest, or a 1v1 challenger. The wallet sells coin packs in Kenyan shillings. Gift receipts identify the sender and recipient. Coins and received gifts are for use on the platform, with no cash withdrawal flow.
+Signed-in viewers can send virtual gifts to the host, an accepted guest, or a 1v1 challenger. New gifts reserve 15% for the platform and record 85% as performer earnings in the same transaction. The wallet and admin dashboard show the respective totals. Earnings are recorded in coins with two decimal places. Cash withdrawals are outside this flow.
+
+## Promote
+
+Creators can promote their own videos from the feed or **Account → Promote**, and boost an active broadcast from **Share LIVE → Boost LIVE**. The platform counts one visible placement per signed-in account or anonymous browser for each campaign, and shows action clicks in the campaign dashboard. Budgets are reserved from the wallet. Unspent coins return on expiry, stop, or when the last creative or broadcast becomes unavailable. Website actions open the creator’s supplied HTTPS destination.
 
 - **M-Pesa.** Provision Daraja M-Pesa Express for the Mwitu merchant. In the private API environment set `MPESA_ENV=production`, `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY` and `PAYMENT_API_ORIGIN=https://api.tiktokmwitu.co.ke`. The API supplies the order-specific HTTPS callback to Daraja. The default `MPESA_TRANSACTION_TYPE` is `CustomerPayBillOnline`.
 - **Card.** Set the Mwitu merchant's KES-enabled `PAYSTACK_SECRET_KEY` in the private API environment. In Paystack configure `https://api.tiktokmwitu.co.ke/api/gifts/webhooks/card` and set `PAYSTACK_WEBHOOK_SECRET` when using Paystack's dedicated signing secret. The API also accepts Paystack's legacy signature and verifies the payment with Paystack before adding coins.

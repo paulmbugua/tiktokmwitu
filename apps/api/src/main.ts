@@ -25,6 +25,8 @@ import { VideosController } from './videos';
 import { giftSchema } from './gift-store';
 import { GiftPaymentsController, reconcileTopups } from './gift-payments';
 import { LiveGiftsController } from './live-gifts';
+import { inviteSchema, LiveInvitesController } from './live-invites';
+import { PromoteController, promotionSchema, settlePromotions } from './promote';
 
 @Controller()
 class HealthController {
@@ -46,7 +48,7 @@ class HealthController {
     },
   })],
   controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, LiveStageController, LiveModerationController,
-    AdminController, GiftPaymentsController, LiveGiftsController],
+    AdminController, GiftPaymentsController, LiveGiftsController, LiveInvitesController, PromoteController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 class AppModule {}
@@ -55,7 +57,7 @@ async function start() {
   if (!process.env.DATABASE_URL && !process.env.PGHOST) throw new Error('Set DATABASE_URL or PGHOST before starting the API.');
   const publicMedia = join(mediaDir, 'public');
   await mkdir(publicMedia, { recursive: true });
-  await db.query(schema + liveSchema + giftSchema);
+  await db.query(schema + liveSchema + giftSchema + inviteSchema + promotionSchema);
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
   app.use(helmet());
@@ -143,6 +145,8 @@ async function start() {
   liveSweep.unref();
   const paymentSweep = setInterval(() => void reconcileTopups(), 4000);
   paymentSweep.unref();
+  const promotionSweep = setInterval(() => void settlePromotions(), 12000);
+  promotionSweep.unref();
   if (useR2) {
     const mediaSweep = setInterval(() => void sweepCloudMedia().catch(error => console.error('Media cleanup failed', error)), 60000);
     mediaSweep.unref();

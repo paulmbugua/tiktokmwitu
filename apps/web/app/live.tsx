@@ -5,14 +5,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyRound, Radio } from 'lucide-react';
 import { send, useData, type Person } from './client';
 import Broadcast, { type Grant } from './live-broadcast';
+import { promotionAction, promotionEvent, usePlacementView, type Placement } from './promote';
 
 type Listing = { enabled: boolean; rooms: Array<Person & { viewers: number; host_id: string }> };
 type RoomPreview = Pick<Person, 'id' | 'handle' | 'display_name'> & { guestAccess: boolean };
 const normalize = (value: string) => value.trim().replace(/[\s-]+/g, '').toUpperCase();
-const validCode = /^[0-9A-F]{12}$/;
+const validCode = /^[0-9A-F]{16}$/;
 
-export default function Live({ user, initialCode, resume, signIn }: {
-  user: Person | null; initialCode?: string; resume?: boolean; signIn: (code?: string) => void;
+export default function Live({ user, initialCode, resume, roomId, signIn }: {
+  user: Person | null; initialCode?: string; resume?: boolean; roomId?: string; signIn: (code?: string) => void;
 }) {
   const [revision, setRevision] = useState(0);
   const [grant, setGrant] = useState<Grant | null>(null);
@@ -22,6 +23,10 @@ export default function Live({ user, initialCode, resume, signIn }: {
   const [codeInput, setCodeInput] = useState(initialCode ?? '');
   const resumed = useRef(false);
   const listing = useData<Listing>(grant || code ? null : '/live', revision);
+  const placement=useData<Placement|null>(!grant&&!code?'/promote/placement?surface=live':null)?.data;
+  const promoted=listing?.data?.rooms.find(room=>room.id===placement?.liveId);
+  const [adRef,setAdRef]=useState<HTMLElement|null>(null);
+  usePlacementView(adRef,promoted?placement:undefined);
   const preview = useData<RoomPreview>(!grant && validCode.test(code) ? '/live/handoff/' + code : null, revision);
   const sharedRoom = preview?.data;
   useEffect(() => {
@@ -34,7 +39,7 @@ export default function Live({ user, initialCode, resume, signIn }: {
     if (!user) { signIn(handoffCode); return; }
     setPending(true);
     setError('');
-    try { setGrant(await send<Grant>(id ? '/live/' + id + '/join' : '/live/start', 'POST')); }
+    try { setGrant(await send<Grant>(handoffCode ? '/live/handoff/'+handoffCode+'/join' : id ? '/live/' + id + '/join' : '/live/start', 'POST')); }
     catch (error) { setError((error as Error).message); }
     finally { setPending(false); }
   }, [signIn, user]);
@@ -48,10 +53,10 @@ export default function Live({ user, initialCode, resume, signIn }: {
   }
 
   useEffect(() => {
-    if (!resume || resumed.current || !user || !sharedRoom || !code) return;
+    if (!resume || resumed.current || !user || (!roomId && (!sharedRoom || !code))) return;
     resumed.current = true;
-    void join(sharedRoom.id, code);
-  }, [code, join, sharedRoom, resume, user]);
+    void join(roomId ?? sharedRoom?.id, code || undefined);
+  }, [code, join, sharedRoom, resume, roomId, user]);
 
   function browse() {
     setGrant(null);
@@ -69,7 +74,7 @@ export default function Live({ user, initialCode, resume, signIn }: {
   if (code) return <section className="live-handoff" aria-label="LIVE invitation">
     <h3>{sharedRoom ? sharedRoom.display_name + ' is live' : 'Join a LIVE'}</h3>
     {sharedRoom && <p className="hint">@{sharedRoom.handle} · Code {code}</p>}
-    {!validCode.test(code) && <p className="error">Enter a 12-character LIVE code.</p>}
+    {!validCode.test(code) && <p className="error">Enter a 16-character LIVE code.</p>}
     {validCode.test(code) && !preview && <p role="status">Finding this LIVE…</p>}
     {preview?.error && <p className="error" role="alert">{preview.error}</p>}
     {error && <p className="error" role="alert">{error}</p>}
@@ -87,7 +92,7 @@ export default function Live({ user, initialCode, resume, signIn }: {
     <form className="inline" onSubmit={event => {
       event.preventDefault();
       const next = normalize(codeInput);
-      if (!validCode.test(next)) { setError('Enter a 12-character LIVE code.'); return; }
+      if (!validCode.test(next)) { setError('Enter a 16-character LIVE code.'); return; }
       setError('');
       setCode(next);
       const url = new URL(window.location.href);
@@ -95,11 +100,17 @@ export default function Live({ user, initialCode, resume, signIn }: {
       window.history.replaceState(null, '', url);
     }}>
       <input aria-label="LIVE room code" placeholder="Enter a LIVE code" value={codeInput} onChange={event => setCodeInput(event.target.value)}
-        maxLength={18} autoCapitalize="characters" autoCorrect="off" spellCheck={false} required />
+        maxLength={22} autoCapitalize="characters" autoCorrect="off" spellCheck={false} required />
       <button className="secondary" disabled={pending}><KeyRound size={16} /> Find LIVE</button>
     </form>
     <div className="list">
-      {listing?.data?.rooms.map(room => <button key={room.id} className="row item" disabled={pending} onClick={() => void join(room.id)}>
+      {promoted&&placement&&<div className="sponsored-live" ref={setAdRef}>
+        <small>Sponsored LIVE</small>
+        <div className="commerce-heading"><strong>{promoted.display_name}</strong><button className="secondary" disabled={pending} onClick={()=>{
+          void promotionEvent(placement,'click');void join(promoted.id);
+        }}>{promotionAction(placement)}</button></div>
+      </div>}
+      {listing?.data?.rooms.filter(room=>room.id!==promoted?.id).map(room => <button key={room.id} className="row item" disabled={pending} onClick={() => void join(room.id)}>
         <Radio size={20} /><div><strong>{room.display_name}</strong><p>@{room.handle} · {room.viewers} watching</p></div>
       </button>)}
       <p className="hint">{listing?.error ?? (!listing?.data ? 'Checking for broadcasts…'

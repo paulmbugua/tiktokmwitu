@@ -10,9 +10,10 @@ import { mpesaPhoneDigest, paymentMethods, PaymentRejected, startCard, startMpes
 const phoneSchema = z.string().trim().max(18).transform(value => value.replace(/[\s-]/g, '').replace(/^\+/, '').replace(/^0/, '254'))
   .refine(value => /^254[17]\d{8}$/.test(value), 'Enter a Kenyan mobile number.');
 const topupFields = {
-  pack: z.enum(['100', '300', '700']),
+  pack: z.enum(['100', '300', '700', '1000', '2000']),
   requestId: z.uuid(),
-  liveCode: z.string().regex(/^[0-9A-F]{12}$/).optional(),
+  liveCode: z.string().regex(/^[0-9A-F]{16}$/).optional(),
+  liveRoom: z.uuid().optional(),
 };
 const topupInput = z.discriminatedUnion('method', [
   z.object({ ...topupFields, method: z.literal('card'), email: z.email().trim().max(200) }),
@@ -69,17 +70,18 @@ export class GiftPaymentsController {
   @Get('wallet')
   async wallet(@Req() req: Request) {
     const user = await requireUser(req);
-    const [balance, purchases, history] = await Promise.all([
+    const [balance, purchases, history, earnings] = await Promise.all([
       coinBalance(user.id),
       db.query<Topup>('SELECT * FROM gift_topups WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT 12', [user.id]),
       db.query(`
-        SELECT g.id::text,g.gift_id,g.coins,g.created_at,(g.sender_id=$1) AS sent,
+        SELECT g.id::text,g.gift_id,g.coins,g.performer_minor,g.created_at,(g.sender_id=$1) AS sent,
           CASE WHEN g.sender_id=$1 THEN r.handle ELSE s.handle END AS handle
         FROM live_gifts g JOIN users s ON s.id=g.sender_id JOIN users r ON r.id=g.recipient_id
         WHERE g.sender_id=$1 OR g.recipient_id=$1 ORDER BY g.id DESC LIMIT 12`, [user.id]),
+      db.query<{ total: string }>('SELECT COALESCE(sum(performer_minor),0)::text AS total FROM live_gifts WHERE recipient_id=$1', [user.id]),
     ]);
     return { balance, gifts: giftCatalog, packs: coinPacks, methods: paymentMethods,
-      purchases: purchases.rows.map(showTopup), history: history.rows };
+      purchases: purchases.rows.map(showTopup), history: history.rows, earnedMinor: earnings.rows[0].total };
   }
 
   @Post('topups')
@@ -101,7 +103,7 @@ export class GiftPaymentsController {
       return showTopup(existing);
     }
     try {
-      const checkout = input.method === 'mpesa' ? await startMpesa(created, input.phone) : await startCard(created, input.email, input.liveCode);
+      const checkout = input.method === 'mpesa' ? await startMpesa(created, input.phone) : await startCard(created, input.email, input.liveCode, input.liveRoom);
       const { rows: [payment] } = await db.query<Topup>(
         'UPDATE gift_topups SET checkout_id=COALESCE(checkout_id,$2),checkout_url=$3 WHERE id=$1 RETURNING *',
         [created.id, checkout.checkoutId, checkout.checkoutUrl]);

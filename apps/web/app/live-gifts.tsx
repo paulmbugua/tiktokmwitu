@@ -33,8 +33,8 @@ export function GiftEffects({ events, now }: { events?: GiftEvent[]; now?: numbe
   </div>;
 }
 
-export default function LiveGifts({ path, liveCode, recipients, refresh }: {
-  path: string; liveCode: string; recipients: Recipient[]; refresh: () => void;
+export default function LiveGifts({ path, liveCode, liveRoom, recipients, refresh }: {
+  path: string; liveCode?: string; liveRoom: string; recipients: Recipient[]; refresh: () => void;
 }) {
   const [revision, setRevision] = useState(0);
   const wallet = useData<Wallet>('/gifts/wallet', revision);
@@ -50,7 +50,7 @@ export default function LiveGifts({ path, liveCode, recipients, refresh }: {
   const enough = !!gift && (wallet?.data?.balance ?? 0) >= gift.coins;
   if (buy) return <>
     <button className="link gift-back" onClick={() => { setBuy(false); setRevision(value => value + 1); }}><ArrowLeft size={16} /> Back to gifts</button>
-    <GiftWallet liveCode={liveCode} />
+    <GiftWallet liveCode={liveCode} liveRoom={liveRoom} />
   </>;
   return <div className="live-gift-shop">
     <div className="live-gift-balance">

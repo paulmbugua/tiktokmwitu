@@ -26,6 +26,15 @@ export class AdminController {
     return requireAdmin(req);
   }
 
+  @Get('gift-revenue')
+  async giftRevenue(@Req() req: Request) {
+    await requireAdmin(req);
+    const { rows: [revenue] } = await db.query(`
+      SELECT COALESCE(sum(platform_minor),0)::text AS "platformMinor",COALESCE(sum(performer_minor),0)::text AS "performerMinor",
+        count(platform_minor)::text AS gifts FROM live_gifts`);
+    return revenue;
+  }
+
   @Get('live-reports')
   async liveReports(@Req() req: Request) {
     await requireAdmin(req);

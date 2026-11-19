@@ -1,6 +1,6 @@
-import { Body, ConflictException, Controller, ForbiddenException, Get, NotFoundException, Param, Post, Req, ServiceUnavailableException } from '@nestjs/common';
+import { Body, ConflictException, Controller, ForbiddenException, Get, NotFoundException, Param, Post, Req, Res, ServiceUnavailableException } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { AccessToken, DataPacket_Kind, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
@@ -8,6 +8,8 @@ import { z } from 'zod';
 import { cleanText, cookie, db, handleSchema, identity, parse, requireUser, uuid, type Person } from './infra';
 import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle, stageSnapshot, type LiveRoom } from './live-store';
 import { recentGifts } from './gift-store';
+import { browserKey } from './commerce';
+import { checkInvite, claimInvite, normalizeInvite, type InvitePass } from './live-invites';
 
 const { LIVEKIT_URL: url, LIVEKIT_API_KEY: key, LIVEKIT_API_SECRET: secret } = process.env;
 const internalUrl = process.env.LIVEKIT_INTERNAL_URL || url;
@@ -20,10 +22,11 @@ const duration = 180;
 export const guestIdentityPrefix = 'guest:';
 
 async function handoffRoom(raw: string) {
-  const code = parse(z.string().trim().toUpperCase().regex(/^[0-9A-F]{12}$/, 'Enter the 12-character LIVE code.'), raw);
-  const { rows: [room] } = await db.query<LiveRoom & { handle: string; display_name: string }>(`
-    SELECT r.*,u.handle,u.display_name FROM live_rooms r JOIN users u ON u.id=r.host_id
-    WHERE r.share_code=$1 AND r.online_at IS NOT NULL`, [code]);
+  const code = normalizeInvite(raw);
+  const { rows: [room] } = await db.query<LiveRoom & InvitePass & { handle: string; display_name: string }>(`
+    SELECT r.*,p.code,p.expires_at,p.claim_browser,p.claim_user,p.room_id,u.handle,u.display_name
+    FROM live_invite_passes p JOIN live_rooms r ON r.id=p.room_id JOIN users u ON u.id=r.host_id
+    WHERE p.code=$1 AND r.online_at IS NOT NULL`, [code]);
   if (!room) throw new NotFoundException('This LIVE code is invalid or the broadcast has ended.');
   return room;
 }
@@ -58,11 +61,11 @@ async function waitForCamera(id: string, userId: string) {
   throw new ConflictException('Start your camera first.');
 }
 
-async function grant(room: LiveRoom, user: Pick<Person, 'id' | 'display_name'>, guest = false) {
+async function grant(room: LiveRoom, user: Pick<Person, 'id' | 'display_name'>, guest = false, shareCode?: string) {
   const host = !guest && room.host_id === user.id;
   const token = new AccessToken(key, secret, { identity: user.id, name: user.display_name, ttl: '30s' });
   token.addGrant({ roomJoin: true, room: roomName(room.id), ...publishPermission(host) });
-  return { url, token: await token.toJwt(), host, guest, id: room.id, hostId: room.host_id, shareCode: room.share_code };
+  return { url, token: await token.toJwt(), host, guest, id: room.id, hostId: room.host_id, shareCode };
 }
 
 export async function finishRoom(id: string, outcome: string, moderator?: Person) {
@@ -185,9 +188,10 @@ export class LiveController {
 
   @Get('handoff/:code')
   @Throttle({ default: { ttl: 60000, limit: 30 } })
-  async handoff(@Param('code') raw: string) {
+  async handoff(@Param('code') raw: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     liveService();
     const match = await handoffRoom(raw);
+    checkInvite(match, browserKey(req, res), (await identity(req.cookies[cookie]))?.id);
     if (match.ended_at) throw new NotFoundException('This LIVE code is invalid or the broadcast has ended.');
     const [room] = await liveService().listRooms([roomName(match.id)]);
     if (!room) throw new NotFoundException('This LIVE is no longer available.');
@@ -198,7 +202,7 @@ export class LiveController {
 
   @Post('handoff/:code/watch')
   @Throttle({ default: { ttl: 60000, limit: 30 } })
-  async watch(@Req() req: Request, @Param('code') raw: string) {
+  async watch(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Param('code') raw: string) {
     liveService();
     const room = await handoffRoom(raw);
     await connectedUser(room.id, room.host_id);
@@ -207,13 +211,31 @@ export class LiveController {
       requireOpen(fresh);
       if (user) await member(client, fresh, user);
       if (!fresh.guest_access) throw new ForbiddenException('The host has turned off guest watching.');
-      return grant(fresh, { id: guestIdentityPrefix + randomUUID(), display_name: 'Guest viewer' }, true);
+      await claimInvite(client, room.code, room.id, browserKey(req, res), user?.id);
+      return grant(fresh, { id: guestIdentityPrefix + randomUUID(), display_name: 'Guest viewer' }, true, room.code);
+    });
+  }
+
+  @Post('handoff/:code/join')
+  async joinInvite(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Param('code') raw: string) {
+    const user = await requireUser(req);
+    const room = await handoffRoom(raw);
+    await connectedUser(room.id, room.host_id);
+    return lockedRoom(room.id, async (client, fresh) => {
+      requireOpen(fresh);
+      await member(client, fresh, user);
+      await claimInvite(client, room.code, room.id, browserKey(req, res), user.id);
+      await client.query(`INSERT INTO live_members(room_id,user_id,joined_at) VALUES($1,$2,now())
+        ON CONFLICT(room_id,user_id) DO UPDATE SET joined_at=now()`, [room.id, user.id]);
+      return grant(fresh, user, false, room.code);
     });
   }
 
   @Get('handoff/:code/state')
-  async guestState(@Param('code') raw: string) {
+  async guestState(@Param('code') raw: string, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const room = await handoffRoom(raw);
+    if (!room.claim_browser) throw new ForbiddenException('Join with this invite to continue.');
+    checkInvite(room, browserKey(req, res), (await identity(req.cookies[cookie]))?.id);
     return lockedRoom(room.id, async (client, fresh) => {
       const { rows: [match] } = await client.query(`
         SELECT m.id,m.guest_id,m.status,m.starts_at,m.ends_at,m.host_score,m.guest_score,m.winner_id,m.outcome,
@@ -276,6 +298,9 @@ export class LiveController {
     return lockedRoom(uuid(raw), async (client, room) => {
       const self = await member(client, room, user);
       await settle(client, room);
+      const {rows:[hostProfile]}=await client.query<{handle:string;following:boolean}>(`
+        SELECT u.handle,EXISTS(SELECT 1 FROM follows f WHERE f.creator_id=u.id AND f.follower_id=$2) AS following
+        FROM users u WHERE u.id=$1`,[room.host_id,user.id]);
       const { rows: [match] } = await client.query(`
         SELECT m.id,m.guest_id,m.status,m.starts_at,m.ends_at,m.expires_at,m.host_score,m.guest_score,m.winner_id,m.outcome,
           u.display_name AS guest_name, (SELECT side FROM live_votes WHERE match_id=m.id AND user_id=$2) AS voted
@@ -286,7 +311,7 @@ export class LiveController {
         WHERE m.room_id=$1 AND m.deleted_at IS NULL ORDER BY (m.id=$2) DESC NULLS LAST,m.created_at DESC,m.id DESC LIMIT 60`,
         [room.id, room.pinned_id]);
       return {
-        self, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
+        self, hostProfile, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
         match, stage: await stageSnapshot(client, room, user.id), messages: messages.reverse(),
         gifts: await recentGifts(client, room.id), now: Date.now(),
       };

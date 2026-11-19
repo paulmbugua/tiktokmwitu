@@ -3,7 +3,7 @@
 
 import {
   ArrowDown, ArrowDownToLine, ArrowUp, Bookmark, Check, ChevronRight, Clapperboard, Coins, Compass,
-  Flag, Heart, House, Inbox as InboxIcon, MapPin, MessageCircle, Plus, Radio, Search,
+  Flag, Flame, Heart, House, Inbox as InboxIcon, MapPin, MessageCircle, Plus, Radio, Search, Ticket,
   Send, Share2, Trash2, UploadCloud, UserRound, UsersRound, Volume2, VolumeX, X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -12,15 +12,18 @@ import dynamic from 'next/dynamic';
 import SignupNameFields from './signup-name-fields';
 import InstallApp from './install-app';
 import GiftWallet from './gift-wallet';
+import LiveInvitePlans from './live-invite-plans';
+import Promote, { promotionAction, promotionEvent, usePlacementView, type Placement } from './promote';
 import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Profile, type Video } from './client';
 
 type Tab = 'For You' | 'Following' | 'Discover';
-type WalletPanel = { kind: 'wallet'; purchaseId?: string; liveCode?: string };
+type WalletPanel = { kind: 'wallet'; purchaseId?: string; liveCode?: string; liveRoom?:string };
 type Panel =
-  | { kind: 'upload' | 'inbox' | 'account' | 'saved' }
+  | { kind: 'upload' | 'inbox' | 'account' | 'saved' | 'invites' }
   | { kind: 'auth'; liveCode?: string; wallet?: WalletPanel }
   | WalletPanel
-  | { kind: 'live'; code?: string; resume?: boolean }
+  | { kind: 'live'; code?: string; resume?: boolean; roomId?:string }
+  | { kind: 'promote'; videoId?:string }
   | { kind: 'comments' | 'report'; video: Video }
   | { kind: 'profile' | 'chat'; handle: string };
 
@@ -71,13 +74,16 @@ function SavedVideos({ show }: { show: (id: string) => void }) {
   </>;
 }
 
-function Clip({ video, root, muted, onMute, children, profile, manage }: {
+function Clip({ video, root, muted, onMute, children, profile, manage, promotion, goalAction }: {
   video: Video; root: HTMLElement | null; muted: boolean; onMute: () => void; children: ReactNode; profile: () => void; manage: ReactNode;
+  promotion?:Placement; goalAction:()=>void;
 }) {
   const section = useRef<HTMLElement>(null);
   const player = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [adRef,setAdRef]=useState<HTMLElement|null>(null);
+  usePlacementView(adRef,promotion);
   useEffect(() => {
     const element = section.current;
     const media = player.current;
@@ -112,6 +118,12 @@ function Clip({ video, root, muted, onMute, children, profile, manage }: {
           {manage}
         </div>
         {video.caption && <p>{video.caption}</p>}
+        {promotion&&<div ref={setAdRef} className="commerce-heading promoted-cta">
+          <small>Sponsored</small>
+          {promotion.destination ? <a className="secondary" href={promotion.destination} target="_blank" rel="noopener noreferrer sponsored"
+            onClick={()=>void promotionEvent(promotion,'click')}>{promotionAction(promotion)}</a>
+            : <button className="secondary" onClick={()=>{void promotionEvent(promotion,'click');if(promotion.goal==='views')void player.current?.play().catch(()=>undefined);else goalAction();}}>{promotionAction(promotion)}</button>}
+        </div>}
       </div>
     </div>
   </article>;
@@ -148,8 +160,10 @@ export default function Home() {
     if (id && /^[a-f0-9-]{36}$/i.test(id)) setShared(id);
     const liveCode = params.get('live');
     const topup = params.get('topup');
+    const liveRoom=params.get('room')??'';
     if (topup && /^[a-f0-9-]{36}$/i.test(topup)) {
-      setPanel({ kind: 'wallet', purchaseId: topup, liveCode: liveCode && /^[a-f0-9]{12}$/i.test(liveCode) ? liveCode : undefined });
+      setPanel({ kind: 'wallet', purchaseId: topup, liveCode: liveCode && /^[a-f0-9]{16}$/i.test(liveCode) ? liveCode : undefined,
+        liveRoom:/^[a-f0-9-]{36}$/i.test(liveRoom)?liveRoom:undefined });
     } else if (liveCode) setPanel({ kind: 'live', code: liveCode.slice(0, 32) });
     api<{ user: Person | null }>('/auth/me').then(result => setUser(result.user)).catch(() => undefined).finally(() => setSessionReady(true));
   }, []);
@@ -185,16 +199,22 @@ export default function Home() {
   if (tab === 'Discover' && query) filters.set('q', query);
   const feedPath = '/videos?' + filters.toString();
   const feed = useData<Feed>(feedPath, feedRev);
+  const placementResult=useData<Placement|null>(sessionReady&&tab==='For You'&&!shared?'/promote/placement?surface=feed':null);
+  const placement=placementResult?.data;
+  const promotedVideo=useData<Video>(placement?.videoId?'/videos/'+placement.videoId:null,feedRev);
   const linked = useData<Video>(shared ? '/videos/' + shared : null, feedRev);
   const comments = useData<Comment[]>(panel?.kind === 'comments' ? '/videos/' + panel.video.id + '/comments' : null, feedRev);
   const creator = useData<Profile>(panel?.kind === 'profile' ? '/creators/' + panel.handle : null, feedRev);
   const creatorVideos = useData<Feed>(panel?.kind === 'profile' ? '/videos?creator=' + panel.handle : null, feedRev);
   const inbox = useData<Inbox[]>(panel?.kind === 'inbox' && user ? '/inbox' : null, inboxRev);
   const messages = useData<Message[]>(panel?.kind === 'chat' && user ? '/inbox/' + panel.handle : null, inboxRev);
-  const clips = shared
+  const organic = shared
     ? (linked?.data ? [linked.data] : [])
     : [...new Map([...(feed?.data?.items ?? []), ...(extra?.items ?? [])]
       .reverse().map(video => [video.id, video])).values()].reverse();
+  const paid=promotedVideo?.data;
+  const baseClips=paid?organic.filter(video=>video.id!==paid.id):organic;
+  const clips=paid?[...baseClips.slice(0,1),paid,...baseClips.slice(1)]:baseClips;
 
   function open(next: Panel) {
     setDialogError('');
@@ -214,7 +234,7 @@ export default function Home() {
 
   function clearCheckout() {
     const url = new URL(window.location.href);
-    for (const key of ['topup', 'reference', 'trxref', 'live']) url.searchParams.delete(key);
+    for (const key of ['topup', 'reference', 'trxref', 'live','room']) url.searchParams.delete(key);
     window.history.replaceState(null, '', url);
   }
 
@@ -340,7 +360,7 @@ export default function Home() {
     auth: mode === 'register' ? 'Join Tiktok mwitu' : 'Welcome back',
     upload: 'Post a video', comments: 'Comments', profile: 'Creator profile',
     inbox: 'Inbox', chat: panel && 'handle' in panel ? '@' + panel.handle : 'Chat',
-    report: 'Report video', account: 'Your account', live: 'Live broadcasts', saved: 'Saved videos', wallet: 'Coin wallet',
+    report: 'Report video', account: 'Your account', live: 'Live broadcasts', saved: 'Saved videos', wallet: 'Coin wallet', invites:'LIVE invite plans',promote:'Promote',
   };
   const feedError = shared ? linked?.error : feed?.error;
   const ready = shared ? !!linked : !!feed;
@@ -395,7 +415,11 @@ export default function Home() {
         }}>
           {clips.map(video => <Clip key={video.id} video={video} root={root} muted={muted} onMute={() => setMuted(!muted)}
             profile={() => open({ kind: 'profile', handle: video.handle })}
+            promotion={video.id===paid?.id?placement??undefined:undefined}
+            goalAction={()=>open(placement?.goal==='engagement'?{kind:'comments',video}:{kind:'profile',handle:video.handle})}
             manage={<div className="clip-utilities">
+              {user?.id===video.creator_id&&<button className="icon" aria-label="Promote video" title="Promote video"
+                onClick={()=>open({kind:'promote',videoId:video.id})}><Flame size={18}/></button>}
               <button className="icon" aria-label="Share" title="Share" onClick={() => void share(video.id)}><Share2 size={18} /></button>
               {user?.id === video.creator_id
                 ? <button className="icon" aria-label="Delete video" onClick={() => {
@@ -457,7 +481,7 @@ export default function Home() {
       }
       setPanel(null);
     }}>
-      {panel.kind === 'live' && <Live user={user} initialCode={panel.code} resume={panel.resume}
+      {panel.kind === 'live' && <Live user={user} initialCode={panel.code} resume={panel.resume} roomId={panel.roomId}
         signIn={liveCode => open({ kind: 'auth', liveCode })} />}
       {panel.kind === 'auth' && <form onSubmit={submit}>
         {panel.liveCode && <p className="hint">After signing in, you’ll return to the LIVE.</p>}
@@ -536,18 +560,22 @@ export default function Home() {
         </div>
         <button className="secondary" onClick={() => open({ kind: 'saved' })}><Bookmark size={17} /> Saved videos</button>
         <button className="secondary" onClick={() => open({ kind: 'wallet' })}><Coins size={17} /> Coin wallet</button>
+        <button className="secondary" onClick={() => open({ kind: 'invites' })}><Ticket size={17} /> LIVE invite plans</button>
+        <button className="secondary" onClick={() => open({ kind: 'promote' })}><Flame size={17} /> Promote</button>
       </div>}
       {panel.kind === 'wallet' && <>
         {!sessionReady ? <p role="status">Opening your wallet…</p>
-          : user ? <GiftWallet purchaseId={panel.purchaseId} liveCode={panel.liveCode} /> : <button className="primary" onClick={() => {
+          : user ? <GiftWallet purchaseId={panel.purchaseId} liveCode={panel.liveCode} liveRoom={panel.liveRoom} /> : <button className="primary" onClick={() => {
           setMode('login');
           open({ kind: 'auth', wallet: panel });
         }}>Sign in to view wallet</button>}
-        {panel.liveCode && <button className="link" onClick={() => {
+        {(panel.liveCode||panel.liveRoom) && user && <button className="link" onClick={() => {
           clearCheckout();
-          open({ kind: 'live', code: panel.liveCode, resume: true });
+          open({ kind: 'live', code: panel.liveCode, roomId:panel.liveRoom, resume: true });
         }}>Return to LIVE</button>}
       </>}
+      {panel.kind==='invites'&&user&&<LiveInvitePlans/>}
+      {panel.kind==='promote'&&user&&<Promote videoId={panel.videoId}/>}
       {panel.kind === 'saved' && user && <SavedVideos show={showVideo} />}
       {dialogError && <p className="error" role="alert">{dialogError}</p>}
     </Dialog>}

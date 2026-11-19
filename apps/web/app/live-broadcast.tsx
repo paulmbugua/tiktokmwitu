@@ -8,10 +8,12 @@ import LiveModeration from './live-controls';
 import { CameraEffects, cameraLooks, type CameraLook } from './live-effects';
 import { StageControls, StageTile, type StageCommand, type StageState } from './live-stage';
 import LiveGifts, { GiftEffects, type GiftEvent } from './live-gifts';
+import LiveInvitePlans from './live-invite-plans';
+import Promote from './promote';
 
-const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects', stage: 'Guest stage', gifts: 'LIVE gifts' };
+const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects', stage: 'Guest stage', gifts: 'LIVE gifts', promote: 'Promote' };
 
-export type Grant = { id: string; url: string; token: string; host: boolean; guest?: boolean; hostId: string; shareCode: string };
+export type Grant = { id: string; url: string; token: string; host: boolean; guest?: boolean; hostId: string; shareCode?: string };
 export type ChatLine = { id: string; user_id: string; handle: string; body: string };
 type Match = {
   id: string; guest_id: string; guest_name: string;
@@ -21,6 +23,7 @@ type Match = {
   voted: 'host' | 'guest' | null;
 };
 type Snapshot = {
+  hostProfile?:{handle:string;following:boolean};
   room: { id: string; chat_open: boolean; pinned_id: string | null; ended: boolean; guest_access: boolean };
   self: { role: 'host' | 'moderator' | 'viewer' | 'guest'; mutedUntil: string | null };
   match?: Match; stage?: StageState; messages: ChatLine[]; gifts?: GiftEvent[]; now: number;
@@ -61,7 +64,6 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const [strength, setStrength] = useState(55);
   const [effectPending, setEffectPending] = useState(false);
   const [effectError, setEffectError] = useState('');
-  const [shareNotice, setShareNotice] = useState('');
   const [reporting, setReporting] = useState<{ id: string; label: string }>();
   const [camera, setCamera] = useState(true);
   const [mic, setMic] = useState(true);
@@ -89,7 +91,6 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const canModerate = state?.self.role === 'host' || state?.self.role === 'moderator';
   const chatAllowed = canModerate || (state?.room.chat_open && (!state.self.mutedUntil || new Date(state.self.mutedUntil).getTime() <= clock));
   const sync = () => setRevision(value => value + 1);
-  const shareUrl = () => new URL('/?live=' + grant.shareCode, window.location.origin).href;
   const toggleDrawer = (panel: keyof typeof drawerTitles) => setDrawer(current => current === panel ? null : panel);
 
   async function applyLook(next: CameraLook) {
@@ -122,19 +123,6 @@ export default function Broadcast({ grant, user, signIn, leave }: {
     } finally { setEffectPending(false); }
   }
 
-  async function shareRoom(action: 'link' | 'code' | 'share') {
-    setShareNotice('');
-    try {
-      if (action === 'share') {
-        await navigator.share({ title: 'Join this LIVE on Tiktok mwitu', text: 'LIVE code: ' + grant.shareCode, url: shareUrl() });
-      } else {
-        await navigator.clipboard.writeText(action === 'code' ? grant.shareCode : shareUrl());
-        setShareNotice(action === 'code' ? 'LIVE code copied.' : 'Share link copied.');
-      }
-    } catch (error) {
-      if ((error as Error).name !== 'AbortError') setShareNotice('Select and copy the link or code above.');
-    }
-  }
 
   useEffect(() => {
     if (!connected) return;
@@ -404,7 +392,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       </span>
       <div className="arena-buttons">
         <button className="arena-action" aria-label={fit ? 'Fill screen' : 'Fit entire video'} title={fit ? 'Fill screen' : 'Fit entire video'} aria-pressed={fit} onClick={() => setFit(value => !value)}>{fit ? <Maximize size={18} /> : <Minimize size={18} />}</button>
-        {connected && grant.shareCode && <button className="arena-action" aria-label="Share LIVE" title="Share LIVE" onClick={() => toggleDrawer('share')} aria-expanded={drawer === 'share'}><Share2 size={18} /></button>}
+        {connected && grant.host && <button className="arena-action" aria-label="Share LIVE" title="Share LIVE" onClick={() => toggleDrawer('share')} aria-expanded={drawer === 'share'}><Share2 size={18} /></button>}
         {connected && grant.host && <button className="arena-action" aria-label="Guest stage" title="Guest stage"
           onClick={() => toggleDrawer('stage')} aria-expanded={drawer === 'stage'}><UsersRound size={18} /></button>}
         {canModerate && <button className="arena-action" aria-label="Moderation" title="Moderation" onClick={() => toggleDrawer('moderation')} aria-expanded={drawer === 'moderation'}><Shield size={18} /></button>}
@@ -493,6 +481,11 @@ export default function Broadcast({ grant, user, signIn, leave }: {
           setHideChat(value => !value);
         }}><MessageCircle size={19} /></button>
         {enableAudio && <button className="arena-action arena-pill" onClick={() => void connection.current?.startAudio().catch(() => setError('Could not enable audio.'))}>Enable sound</button>}
+        {connected&&user&&!grant.host&&state?.hostProfile&&<button className="arena-action arena-pill" disabled={pending}
+          aria-pressed={state.hostProfile.following} onClick={()=>{
+            const profile=state.hostProfile!;
+            void perform(()=>send('/creators/'+profile.handle+'/follow','PUT',{enabled:!profile.following}));
+          }}>{state.hostProfile.following?'Following host':'Follow host'}</button>}
         {connected && !isPublisher && <button className="arena-action arena-pill arena-gift-button" aria-label="LIVE gifts"
           aria-expanded={drawer === 'gifts'} onClick={() => user ? toggleDrawer('gifts') : signIn()}><Gift size={19} /> Gifts</button>}
         {connected && isPublisher && <>
@@ -525,16 +518,11 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         <h3>{drawerTitles[drawer]}</h3>
         <button className="arena-action" onClick={() => setDrawer(null)} aria-label={'Close ' + drawerTitles[drawer]}><X size={19} /></button>
       </div>
-      {drawer === 'share' && connected && grant.shareCode && <div className="arena-share">
-        <label>LIVE code<input readOnly value={grant.shareCode} onFocus={event => event.target.select()} /></label>
-        <label>Share link<input readOnly value={shareUrl()} onFocus={event => event.target.select()} /></label>
-        <div className="arena-buttons">
-          <button className="secondary" onClick={() => void shareRoom('link')}>Copy link</button>
-          <button className="secondary" onClick={() => void shareRoom('code')}>Copy code</button>
-          {typeof navigator.share === 'function' && <button className="primary" onClick={() => void shareRoom('share')}>Share link</button>}
-        </div>
-        {shareNotice && <p role="status">{shareNotice}</p>}
-      </div>}
+      {drawer === 'share' && connected && grant.host && <>
+        <LiveInvitePlans roomId={grant.id}/>
+        <button className="secondary" onClick={()=>setDrawer('promote')}>Boost LIVE</button>
+      </>}
+      {drawer === 'promote' && connected && grant.host && <Promote liveId={grant.id}/>}
       {drawer === 'moderation' && canModerate && state && user && <LiveModeration path={path} user={user} hostId={grant.hostId} chatOpen={state.room.chat_open}
         guestAccess={state.room.guest_access} messages={state.messages} pinnedId={state.room.pinned_id} revision={revision} ended={state.room.ended} onChange={sync} />}
       {drawer === 'stage' && grant.host && connected && <>
@@ -544,7 +532,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         {(error || snapshot?.error) && <p className="error" role="alert">{error || snapshot?.error}</p>}
       </>}
       {drawer === 'gifts' && connected && user && !isPublisher &&
-        <LiveGifts path={path} liveCode={grant.shareCode} recipients={tiles} refresh={sync} />}
+        <LiveGifts path={path} liveCode={grant.shareCode} liveRoom={grant.id} recipients={tiles} refresh={sync} />}
       {drawer === 'effects' && isPublisher && <>
         <p className="hint">{camera && localVideo ? 'Changes your camera for everyone watching.' : 'Turn on your camera to use effects.'}</p>
         <div className="arena-looks" aria-label="Camera presets">

@@ -48,8 +48,8 @@ export class LiveGiftsController {
       const { rows: [updated] } = await client.query<{ balance: number }>(
         'UPDATE gift_wallets SET balance=balance-$2 WHERE user_id=$1 RETURNING balance', [sender.id, gift.coins]);
       const { rows: [sent] } = await client.query<{ id: string }>(`
-        INSERT INTO live_gifts(request_id,room_id,sender_id,recipient_id,gift_id,coins)
-        VALUES ($1,$2,$3,$4,$5,$6) RETURNING id::text`, [input.requestId, id, sender.id, input.recipientId, gift.id, gift.coins]);
+        INSERT INTO live_gifts(request_id,room_id,sender_id,recipient_id,gift_id,coins,platform_minor)
+        VALUES ($1,$2,$3,$4,$5,$6,$6*15) RETURNING id::text`, [input.requestId, id, sender.id, input.recipientId, gift.id, gift.coins]);
       return { id: sent.id, balance: updated.balance };
     });
     notifyRoom(id);

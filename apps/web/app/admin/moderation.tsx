@@ -14,6 +14,8 @@ export default function Moderation() {
   const session = useData<Person>('/admin/me', version);
   const reports = useData<Report[]>(session?.data ? '/admin/reports' : null, version);
   const live = useData<LiveReport[]>(session?.data ? '/admin/live-reports' : null, version);
+  const revenue=useData<{platformMinor:string;performerMinor:string;gifts:string}>(session?.data?'/admin/gift-revenue':null,version);
+  const coins=(minor:string)=>(Number(minor)/100).toLocaleString('en-KE',{maximumFractionDigits:2});
 
   function refresh() {
     setVersion(value => value + 1);
@@ -55,6 +57,12 @@ export default function Moderation() {
       <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
       <button className="primary" disabled={pending}>Log in</button>
     </form>}
+    {revenue?.data&&<section className="moderation-report" aria-label="Gift revenue">
+      <h2>Gift revenue</h2>
+      <p>Platform share · {coins(revenue.data.platformMinor)} coins</p>
+      <p>Performer share · {coins(revenue.data.performerMinor)} coins</p>
+      <small>{revenue.data.gifts} gifts with commission</small>
+    </section>}
     {session?.data && <section aria-labelledby="reports-heading">
       <header><h2 id="reports-heading">Video reports</h2><button className="secondary" onClick={refresh}>Refresh</button></header>
       {reports?.error && <p className="error">{reports.error}</p>}
