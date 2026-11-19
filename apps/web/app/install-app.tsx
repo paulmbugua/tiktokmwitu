@@ -16,12 +16,14 @@ export default function InstallApp({ interrupted }: { interrupted: boolean }) {
   const [available, setAvailable] = useState(false);
   const [canPrompt, setCanPrompt] = useState(false);
   const [appleMobile, setAppleMobile] = useState(false);
+  const [androidMobile, setAndroidMobile] = useState(false);
   const [offer, setOffer] = useState(false);
   const [help, setHelp] = useState(false);
   const [snoozed, setSnoozed] = useState(false);
 
   useEffect(() => {
     if (navigator.userAgent.includes('MwituFlutter/')) return;
+    setAndroidMobile(/Android/.test(navigator.userAgent));
     const mode = window.matchMedia('(display-mode: standalone)');
     const appleNavigator = navigator as Navigator & { standalone?: boolean };
     function updateMode() {
@@ -66,10 +68,10 @@ export default function InstallApp({ interrupted }: { interrupted: boolean }) {
   }, []);
 
   useEffect(() => {
-    if (interrupted || !available || !canPrompt || snoozed || offer || help) return;
+    if (androidMobile || interrupted || !available || !canPrompt || snoozed || offer || help) return;
     const timer = window.setTimeout(() => setOffer(true), 750);
     return () => window.clearTimeout(timer);
-  }, [available, canPrompt, help, interrupted, offer, snoozed]);
+  }, [androidMobile, available, canPrompt, help, interrupted, offer, snoozed]);
 
   function dismiss() {
     setOffer(false);
@@ -97,6 +99,8 @@ export default function InstallApp({ interrupted }: { interrupted: boolean }) {
   }
 
   if (!available) return null;
+  if (androidMobile) return <a className="icon install-shortcut" href="/download"
+    aria-label="Download TikTok Mwitu for Android" title="Download TikTok Mwitu for Android"><Download size={20} /></a>;
   return <>
     <button className="icon install-shortcut" aria-label="Install app" title="Install app"
       aria-expanded={help && !interrupted} onClick={() => void install()}>
