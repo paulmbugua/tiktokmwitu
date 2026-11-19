@@ -7,6 +7,11 @@ on:
   pull_request:
     paths: ['apps/mobile/**', '.github/workflows/mobile.yml']
   workflow_dispatch:
+    inputs:
+      google_android:
+        description: Build Android with its Firebase Google sign-in configuration
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,9 +41,20 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
           test -f "$ANDROID_HOME/ndk/28.2.13676358/source.properties"
       - run: flutter pub get
-      - run: flutter build apk --release
+      - name: Build Android release
         env:
           MWITU_UNSIGNED_CI: 'true'
+          MWITU_GOOGLE_ANDROID: ${{ inputs.google_android }}
+          MWITU_GOOGLE_SERVICES_JSON: ${{ inputs.google_android && secrets.MWITU_ANDROID_FIREBASE_RELEASE || '' }}
+        run: |
+          if [ "$MWITU_GOOGLE_ANDROID" = true ]; then
+            test -n "$MWITU_GOOGLE_SERVICES_JSON"
+            umask 077
+            printf '%s\n' "$MWITU_GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            flutter build apk --release --dart-define=MWITU_GOOGLE_ANDROID_ENABLED=true
+          else
+            flutter build apk --release
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: mwitu-android-unsigned
@@ -67,6 +83,7 @@ jobs:
             sleep 8
             adb shell pidof ke.co.tiktokmwitu.mwitu
   iphone:
+    if: ${{ !inputs.google_android }}
     runs-on: macos-26
     defaults:
       run:
