@@ -3,7 +3,7 @@
 
 import {
   ArrowDown, ArrowDownToLine, ArrowUp, Bookmark, Check, ChevronRight, Clapperboard, Coins, Compass,
-  Flag, Flame, Heart, House, Inbox as InboxIcon, MapPin, MessageCircle, Plus, Radio, Search, Ticket,
+  Download, Flag, Flame, Heart, House, Inbox as InboxIcon, MapPin, MessageCircle, Plus, Radio, Search, Ticket,
   Send, Share2, Trash2, UploadCloud, UserRound, UsersRound, Volume2, VolumeX, X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -153,6 +153,7 @@ export default function Home() {
   const [dialogError, setDialogError] = useState('');
   const [pending, setPending] = useState(false);
   const [google, setGoogle] = useState<'web' | 'android' | null>(null);
+  const [nativeApp, setNativeApp] = useState(false);
   const [fileName, setFileName] = useState('');
   const [mutation, setMutation] = useState(false);
   const paneKind = useRef<string | undefined>(undefined);
@@ -161,6 +162,8 @@ export default function Home() {
   const refresh = () => setFeedRev(value => value + 1);
   const refreshInbox = () => setInboxRev(value => value + 1);
   useEffect(() => {
+    const app = /MwituFlutter\//.test(navigator.userAgent);
+    setNativeApp(app);
     const params = new URLSearchParams(window.location.search);
     const id = params.get('v');
     const videoId = id && /^[a-f0-9-]{36}$/i.test(id) ? id : undefined;
@@ -187,7 +190,6 @@ export default function Home() {
     }
     api<{ user: Person | null; google?: GoogleSignIn; googleSignup?: GoogleSignup }>('/auth/me').then(result => {
       setUser(result.user);
-      const app = /MwituFlutter\//.test(navigator.userAgent);
       if (app && (window as GoogleWindow).mwituAndroidGoogle && result.google?.android) setGoogle('android');
       if (!app && result.google?.web) setGoogle('web');
       if (googleStatus) {
@@ -669,6 +671,9 @@ export default function Home() {
           <button className="secondary" onClick={() => void logout()}>Log out</button>
         </div>
         <div className="account-links">
+          {!nativeApp && <a className="secondary account-download" href="/download">
+            <Download size={19} aria-hidden="true" /> Get the Android app
+          </a>}
           <button className="secondary" onClick={() => open({ kind: 'saved' })}><Bookmark size={19} /> Saved videos</button>
           <button className="secondary" onClick={() => open({ kind: 'wallet' })}><Coins size={19} /> Coin wallet</button>
           <button className="secondary" onClick={() => open({ kind: 'invites' })}><Ticket size={19} /> LIVE invite plans</button>

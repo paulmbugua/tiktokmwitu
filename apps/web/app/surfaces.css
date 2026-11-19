@@ -162,6 +162,7 @@ h2 { font-size: clamp(1.25rem, 3vw, 1.6rem); line-height: 1.18; }
 .profile-actions, .stats { flex-wrap: wrap; justify-content: center; }
 .account-links { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .account-links .secondary { justify-content: flex-start; padding: 10px; font-size: .875rem; text-align: left; }
+.account-links .account-download { grid-column: 1 / -1; text-decoration: none; }
 .account-links svg { color: var(--lavender); }
 .bubble { border-radius: 17px 17px 17px 5px; background: #3a2d49; }
 .bubble.mine { border-radius: 17px 17px 5px 17px; background: #3b4930; }
