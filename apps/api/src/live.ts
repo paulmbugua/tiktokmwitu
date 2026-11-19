@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { AccessToken, DataPacket_Kind, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { z } from 'zod';
 import { cleanText, cookie, db, handleSchema, identity, parse, requireUser, uuid, type Person } from './infra';
-import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle, type LiveRoom } from './live-store';
+import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle, stageSnapshot, type LiveRoom } from './live-store';
 
 const { LIVEKIT_URL: url, LIVEKIT_API_KEY: key, LIVEKIT_API_SECRET: secret } = process.env;
 const internalUrl = process.env.LIVEKIT_INTERNAL_URL || url;
@@ -69,7 +69,8 @@ export async function finishRoom(id: string, outcome: string, moderator?: Person
     if (room.ended_at) return;
     await settle(client, room);
     await endMatch(client, room, outcome, moderator ? undefined : room.host_id);
-    await client.query('UPDATE live_rooms SET ended_at=now() WHERE id=$1', [id]);
+    await client.query('DELETE FROM live_stage_seats WHERE room_id=$1', [id]);
+    await client.query('UPDATE live_rooms SET ended_at=now(),spotlight_id=NULL WHERE id=$1', [id]);
     if (moderator) {
       await client.query('DELETE FROM live_reports WHERE room_id=$1', [id]);
       await client.query(`INSERT INTO live_audit(room_id,actor_id,action,details)
@@ -96,19 +97,16 @@ export async function reconcileLive() {
     await Promise.allSettled(ended.map(name => service.deleteRoom(name)));
     await Promise.allSettled(rows.map(async room => {
       const name = roomName(room.id);
-      const participants = remote.has(name) ? await service.listParticipants(name) : [];
-      const hostPresent = participants.some(person => person.identity === room.host_id);
-      if (hostPresent) hostMissing.delete(room.id);
-      else if (!hostMissing.has(room.id)) hostMissing.set(room.id, Date.now());
-      const missingSince = hostMissing.get(room.id);
-      if ((!room.online_at && Date.now() - room.created_at.getTime() > 60000) ||
-          (missingSince !== undefined && Date.now() - missingSince > 20000 && room.online_at)) {
-        await finishRoom(room.id, 'host_left');
-        return;
-      }
-
       const changed = await lockedRoom(room.id, async (client, fresh) => {
         if (fresh.ended_at) return false;
+        const participants = remote.has(name) ? await service.listParticipants(name) : [];
+        const connected = participants.map(person => person.identity);
+        if (connected.includes(fresh.host_id)) hostMissing.delete(fresh.id);
+        else if (!hostMissing.has(fresh.id)) hostMissing.set(fresh.id, Date.now());
+        const missingSince = hostMissing.get(fresh.id);
+        if ((!fresh.online_at && Date.now() - fresh.created_at.getTime() > 60000) ||
+            (missingSince !== undefined && Date.now() - missingSince > 20000 && fresh.online_at)) return 'host_left';
+
         let updated = await settle(client, fresh);
         let match = await currentMatch(client, fresh);
         if (match?.status === 'running' && !participants.some(person => person.identity === match?.guest_id)) {
@@ -120,6 +118,20 @@ export async function reconcileLive() {
             updated = true;
           }
         } else guestMissing.delete(room.id);
+        await client.query(`
+          UPDATE live_stage_seats SET missing_since=CASE WHEN user_id::text=ANY($2::text[]) THEN NULL ELSE now() END
+          WHERE room_id=$1 AND accepted_at IS NOT NULL AND (missing_since IS NULL)<> (user_id::text=ANY($2::text[]))`, [room.id, connected]);
+        const { rows: expired } = await client.query<{ user_id: string }>(`
+          DELETE FROM live_stage_seats WHERE room_id=$1 AND
+            ((accepted_at IS NULL AND expires_at<=now()) OR missing_since<=now()-interval '25 seconds')
+          RETURNING user_id`, [room.id]);
+        if (expired.length) {
+          await client.query('UPDATE live_rooms SET spotlight_id=NULL WHERE id=$1 AND spotlight_id=ANY($2::uuid[])',
+            [room.id, expired.map(seat => seat.user_id)]);
+          updated = true;
+        }
+        const stage = new Set((await client.query<{ user_id: string }>(
+          'SELECT user_id FROM live_stage_seats WHERE room_id=$1 AND accepted_at IS NOT NULL', [room.id])).rows.map(row => row.user_id));
         const banned = new Set((await client.query<{ user_id: string }>(
           'SELECT user_id FROM live_members WHERE room_id=$1 AND banned', [room.id])).rows.map(row => row.user_id));
         // The same room lock serializes role changes with the permission reconciliation.
@@ -128,13 +140,14 @@ export async function reconcileLive() {
             return service.removeParticipant(name, person.identity);
           }
           const guest = match?.guest_id === person.identity && ['ready', 'running'].includes(match.status);
-          if (person.identity !== fresh.host_id && person.permission?.canPublish && !guest) {
+          if (person.identity !== fresh.host_id && person.permission?.canPublish && !guest && !stage.has(person.identity)) {
             await service.updateParticipant(name, person.identity, { permission: publishPermission(false) });
           }
         }));
         return updated;
       });
-      if (changed) notifyRoom(room.id);
+      if (changed === 'host_left') await finishRoom(room.id, changed);
+      else if (changed) notifyRoom(room.id);
     }));
   } catch (error) {
     console.error('LIVE reconciliation failed', error);
@@ -205,13 +218,14 @@ export class LiveController {
         SELECT m.id,m.guest_id,m.status,m.starts_at,m.ends_at,m.host_score,m.guest_score,m.winner_id,m.outcome,
           u.display_name AS guest_name
         FROM live_matches m JOIN users u ON u.id=m.guest_id
-        WHERE m.room_id=$1 AND m.status IN ('running','finished')
+        WHERE m.room_id=$1 AND m.status IN ('ready','running','finished')
           AND m.id=(SELECT id FROM live_matches WHERE room_id=$1 ORDER BY updated_at DESC,id DESC LIMIT 1)`,
         [fresh.id]);
       return {
         self: { role: 'guest', mutedUntil: null },
         room: { id: fresh.id, ended: !!fresh.ended_at, guest_access: fresh.guest_access, chat_open: false, pinned_id: null },
-        match: fresh.guest_access ? match : undefined, messages: [], now: Date.now(),
+        match: fresh.guest_access ? match : undefined, stage: fresh.guest_access ? await stageSnapshot(client, fresh, null) : undefined,
+        messages: [], now: Date.now(),
       };
     });
   }
@@ -272,7 +286,7 @@ export class LiveController {
         [room.id, room.pinned_id]);
       return {
         self, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
-        match, messages: messages.reverse(), now: Date.now(),
+        match, stage: await stageSnapshot(client, room, user.id), messages: messages.reverse(), now: Date.now(),
       };
     });
   }
@@ -320,6 +334,11 @@ export class LiveController {
       if (command.action === 'invite') {
         if (!host) throw new ForbiddenException('Only the host can invite a challenger.');
         if (match) throw new ConflictException('Finish the current invite or match first.');
+        if ((await client.query(`SELECT 1 FROM live_stage_seats WHERE room_id=$1
+          AND (accepted_at IS NOT NULL OR expires_at>clock_timestamp()) LIMIT 1`, [id])).rowCount) {
+          throw new ConflictException('Clear the guest stage before starting a 1v1.');
+        }
+        await client.query('UPDATE live_rooms SET spotlight_id=NULL WHERE id=$1 AND spotlight_id IS NOT NULL', [id]);
         const { rows: [guest] } = await client.query<Person>('SELECT id,handle,display_name FROM users WHERE handle=$1', [command.handle]);
         if (!guest || guest.id === user.id) throw new NotFoundException('Choose another Tiktok mwitu account.');
         await member(client, room, guest);

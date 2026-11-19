@@ -4,7 +4,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { cleanText, parse, requireUser, uuid } from './infra';
 import { connectedUser, guestIdentityPrefix, liveService, notifyRoom, roomName } from './live';
-import { currentMatch, endMatch, lockedRoom, member, requireOpen, settle } from './live-store';
+import { currentMatch, dropStageSeat, endMatch, lockedRoom, member, requireOpen, settle } from './live-store';
 
 const controls = z.discriminatedUnion('action', [
   z.object({ action: z.literal('chat'), open: z.boolean() }),
@@ -111,6 +111,7 @@ export class LiveModerationController {
               break;
             case 'ban': {
               await client.query('UPDATE live_members SET banned=true,moderator=false WHERE room_id=$1 AND user_id=$2', [id, targetId]);
+              await dropStageSeat(client, id, targetId);
               await settle(client, room);
               const match = await currentMatch(client, room);
               if (match?.guest_id === targetId) await endMatch(client, room, 'guest_removed', targetId);

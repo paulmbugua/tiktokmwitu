@@ -1,13 +1,14 @@
 'use client';
 
-import { Camera, CameraOff, Flag, Heart, Maximize, MessageCircle, Mic, MicOff, Minimize, Send, Share2, Shield, Sparkles, Swords, X } from 'lucide-react';
+import { Camera, CameraOff, Flag, Heart, LogOut, Maximize, MessageCircle, Mic, MicOff, Minimize, Send, Share2, Shield, Sparkles, Swords, UsersRound, X } from 'lucide-react';
 import { LocalVideoTrack, Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { send, useData, type Person } from './client';
 import LiveModeration from './live-controls';
 import { CameraEffects, cameraLooks, type CameraLook } from './live-effects';
+import { StageControls, StageTile, type StageCommand, type StageState } from './live-stage';
 
-const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects' };
+const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects', stage: 'Guest stage' };
 
 export type Grant = { id: string; url: string; token: string; host: boolean; guest?: boolean; hostId: string; shareCode: string };
 export type ChatLine = { id: string; user_id: string; handle: string; body: string };
@@ -21,19 +22,26 @@ type Match = {
 type Snapshot = {
   room: { id: string; chat_open: boolean; pinned_id: string | null; ended: boolean; guest_access: boolean };
   self: { role: 'host' | 'moderator' | 'viewer' | 'guest'; mutedUntil: string | null };
-  match?: Match; messages: ChatLine[]; now: number;
+  match?: Match; stage?: StageState; messages: ChatLine[]; now: number;
 };
+
+async function releaseGuestMedia(room: Room) {
+  const participant = room.localParticipant;
+  const tracks = [participant.getTrackPublication(Track.Source.Camera)?.track, participant.getTrackPublication(Track.Source.Microphone)?.track]
+    .flatMap(track => track ? [track] : []);
+  await participant.unpublishTracks(tracks);
+}
 
 export default function Broadcast({ grant, user, signIn, leave }: {
   grant: Grant; user: Person | null; signIn: () => void; leave: () => void;
 }) {
-  const hostVideo = useRef<HTMLDivElement>(null);
-  const guestVideo = useRef<HTMLDivElement>(null);
   const audioBox = useRef<HTMLDivElement>(null);
   const chatList = useRef<HTMLDivElement>(null);
   const followChat = useRef(true);
   const connection = useRef<Room | null>(null);
   const prepared = useRef<string | null>(null);
+  const preparedSeat = useRef<string | null>(null);
+  const stageSeatRef = useRef<string | null>(null);
   const [status, setStatus] = useState('Connecting…');
   const [error, setError] = useState('');
   const [enableAudio, setEnableAudio] = useState(false);
@@ -45,6 +53,9 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const [fit, setFit] = useState(true);
   const [hideChat, setHideChat] = useState(false);
   const [localVideo, setLocalVideo] = useState<LocalVideoTrack | null>(null);
+  const [videos, setVideos] = useState<Record<string, { track: Track; name: string }>>({});
+  const [cameraRetry, setCameraRetry] = useState(0);
+  const [stageMediaError, setStageMediaError] = useState('');
   const [look, setLook] = useState<CameraLook>(cameraLooks[0]);
   const [strength, setStrength] = useState(55);
   const [effectPending, setEffectPending] = useState(false);
@@ -55,15 +66,24 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const [mic, setMic] = useState(true);
   const [clock, setClock] = useState(0);
   const [liveNotice, setLiveNotice] = useState('');
+  const lastSnapshot = useRef<Snapshot | undefined>(undefined);
   const path = '/live/' + grant.id;
   const statePath = grant.guest ? '/live/handoff/' + grant.shareCode + '/state' : path + '/state';
   const snapshot = useData<Snapshot>(everConnected ? statePath : null, revision);
-  const state = snapshot?.data;
+  const state = snapshot?.data ?? lastSnapshot.current;
+  if (snapshot?.data) lastSnapshot.current = snapshot.data;
   const match = state?.match;
   const activeGuest = match && ['ready', 'running'].includes(match.status) ? match.guest_id : null;
+  const battle = !!match && ['invited', 'ready', 'running'].includes(match.status);
   const split = !!activeGuest;
   const readyMatch = match?.status === 'ready' && activeGuest === user?.id ? match.id : null;
-  const isPublisher = grant.host || activeGuest === user?.id;
+  const seats = state?.stage?.seats ?? [];
+  const mySeat = seats.find(seat => seat.user_id === user?.id);
+  const stageSeatId = mySeat?.on_stage ? mySeat.id : null;
+  stageSeatRef.current = stageSeatId;
+  const isPublisher = grant.host || activeGuest === user?.id || !!stageSeatId;
+  const stageGuests = seats.filter(seat => seat.on_stage);
+  const spotlight = stageGuests.length > 0 && !split ? state?.stage?.spotlight ?? null : null;
   const canModerate = state?.self.role === 'host' || state?.self.role === 'moderator';
   const chatAllowed = canModerate || (state?.room.chat_open && (!state.self.mutedUntil || new Date(state.self.mutedUntil).getTime() <= clock));
   const sync = () => setRevision(value => value + 1);
@@ -130,10 +150,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   }, [state]);
 
   useEffect(() => {
-    const host = hostVideo.current;
-    const guest = guestVideo.current;
     const audio = audioBox.current;
-    if (!host || !guest || !audio) return;
+    if (!audio) return;
     const portraitPhone = window.matchMedia('(pointer: coarse) and (orientation: portrait)').matches;
     const room = new Room({
       adaptiveStream: true,
@@ -155,39 +173,38 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         if (open) setRevision(value => value + 1);
       }, 180);
     }
-    const container = (identity: string) => identity === grant.hostId ? host! : guest!;
+    function addCamera(identity: string, name: string, track: Track) {
+      setVideos(current => ({ ...current, [identity]: { track, name } }));
+    }
+    function removeCamera(track: Track) {
+      setVideos(current => Object.fromEntries(Object.entries(current).filter(([, camera]) => camera.track !== track)));
+    }
     room.on(RoomEvent.LocalTrackPublished, (publication, person) => {
       if (publication.source !== Track.Source.Camera || !publication.track) return;
-      const element = publication.track.attach();
-      element.muted = true;
-      if (element instanceof HTMLVideoElement) {
-        element.playsInline = true;
-        const facing = publication.track.mediaStreamTrack.getSettings().facingMode;
-        if (!facing || facing === 'user') element.classList.add('self-preview');
-      }
-      container(person.identity).append(element);
+      addCamera(person.identity, person.name ?? 'Host', publication.track);
       if (publication.track instanceof LocalVideoTrack) setLocalVideo(publication.track);
     });
     room.on(RoomEvent.LocalTrackUnpublished, publication => {
-      publication.track?.detach().forEach(element => element.remove());
-      if (publication.source === Track.Source.Camera) setLocalVideo(null);
+      if (publication.source !== Track.Source.Camera) return;
+      if (publication.track) removeCamera(publication.track);
+      setLocalVideo(null);
     });
-    room.on(RoomEvent.TrackSubscribed, (track, _publication, person) => {
-      const element = track.attach();
-      if (element instanceof HTMLVideoElement) {
-        element.playsInline = true;
-        container(person.identity).append(element);
-      } else audio.append(element);
+    room.on(RoomEvent.TrackSubscribed, (track, publication, person) => {
+      if (publication.source === Track.Source.Camera) addCamera(person.identity, person.name ?? 'Guest', track);
+      else if (publication.source === Track.Source.Microphone) audio.append(track.attach());
     });
-    room.on(RoomEvent.TrackUnsubscribed, track => track.detach().forEach(element => element.remove()));
+    room.on(RoomEvent.TrackUnsubscribed, (track, publication) => {
+      if (publication.source === Track.Source.Camera) removeCamera(track);
+      else track.detach().forEach(element => element.remove());
+    });
+    room.on(RoomEvent.ParticipantConnected, refresh);
     room.on(RoomEvent.ParticipantDisconnected, refresh);
     room.on(RoomEvent.AudioPlaybackStatusChanged, () => setEnableAudio(!room.canPlaybackAudio));
     room.on(RoomEvent.Reconnecting, () => { setConnected(false); setStatus('Reconnecting…'); });
     room.on(RoomEvent.Reconnected, () => { setConnected(true); setStatus('Live'); refresh(); });
     room.on(RoomEvent.Disconnected, () => {
       if (!open) return;
-      host.replaceChildren();
-      guest.replaceChildren();
+      setVideos({});
       audio.replaceChildren();
       setLocalVideo(null);
       setConnected(false);
@@ -223,8 +240,6 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       connection.current = null;
       room.removeAllListeners();
       void room.disconnect();
-      host.replaceChildren();
-      guest.replaceChildren();
       audio.replaceChildren();
     };
   }, [grant, path]);
@@ -262,10 +277,38 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   }, [activeGuest, connected, match?.id, path, readyMatch, user?.id]);
 
   useEffect(() => {
+    if (!stageSeatId) {
+      preparedSeat.current = null;
+      setStageMediaError('');
+      return;
+    }
+    const room = connection.current;
+    if (!connected || !room || preparedSeat.current === stageSeatId) return;
+    let valid = true;
+    setStageMediaError('');
+    void (async () => {
+      try {
+        await send(path + '/stage', 'POST', { action: 'restore', seatId: stageSeatId });
+        if (!valid) return;
+        await room.localParticipant.enableCameraAndMicrophone();
+        if (!valid) {
+          if (stageSeatRef.current !== stageSeatId) await releaseGuestMedia(room);
+          return;
+        }
+        preparedSeat.current = stageSeatId;
+        setCamera(true);
+        setMic(true);
+      } catch {
+        if (valid) setStageMediaError('Could not start camera and microphone. Check your browser permissions and try again.');
+      }
+    })();
+    return () => { valid = false; };
+  }, [connected, path, stageSeatId, cameraRetry]);
+
+  useEffect(() => {
     if (grant.host || isPublisher) return;
-    const participant = connection.current?.localParticipant;
-    if (participant?.isCameraEnabled) void participant.setCameraEnabled(false).catch(() => undefined);
-    if (participant?.isMicrophoneEnabled) void participant.setMicrophoneEnabled(false).catch(() => undefined);
+    const room = connection.current;
+    if (room) void releaseGuestMedia(room).catch(() => undefined);
   }, [grant.host, isPublisher]);
 
   useEffect(() => {
@@ -279,17 +322,25 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   }, [localVideo]);
 
   async function perform(operation: () => Promise<unknown>, notice = '') {
-    if (pending) return;
+    if (pending) return false;
     setPending(true);
     setError('');
     setLiveNotice('');
-    try { await operation(); setLiveNotice(notice); }
-    catch (error) { setError((error as Error).message); }
+    try { await operation(); setLiveNotice(notice); return true; }
+    catch (error) { setError((error as Error).message); return false; }
     finally { setPending(false); sync(); }
   }
 
   function matchAction(action: string, data: object = {}) {
     return perform(() => send(path + '/match', 'POST', { action, matchId: match?.id, ...data }));
+  }
+
+  function stageAction(command: StageCommand) {
+    return perform(async () => {
+      await send(path + '/stage', 'POST', command);
+      const room = connection.current;
+      if (command.action === 'leave' && room) await releaseGuestMedia(room).catch(() => undefined);
+    }, command.action === 'invite' ? 'Stage invitation sent.' : '');
   }
 
   function submit(event: FormEvent<HTMLFormElement>, endpoint: string, payload: object, notice?: string) {
@@ -303,6 +354,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       if (grant.host) await send(path + '/end', 'POST');
       else if (activeGuest === user?.id && match?.status === 'running' && connected) {
         await send(path + '/match', 'POST', { action: 'forfeit', matchId: match.id });
+      } else if (stageSeatId && connected) {
+        await send(path + '/stage', 'POST', { action: 'leave', seatId: stageSeatId });
       }
       leave();
     });
@@ -323,11 +376,17 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const countdown = starting ? 'Starts in ' + seconds : Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
   const canVote = connected && !!user && !grant.host && match?.guest_id !== user.id && !match?.voted && !starting && seconds > 0;
   const pinned = state?.messages.find(message => message.id === state.room.pinned_id);
+  const tiles = [
+    { id: grant.hostId, name: videos[grant.hostId]?.name ?? 'Host' },
+    ...(activeGuest ? [{ id: activeGuest, name: match!.guest_name }]
+      : stageGuests.map(seat => ({ id: seat.user_id, name: seat.display_name }))),
+  ];
+  const layout = split ? ' split' : spotlight ? ' spotlight-stage' : stageGuests.length ? ' grid-stage' : '';
 
   return <div className="arena">
-    <div className={'arena-media' + (split ? ' split' : '') + (fit ? ' fit' : '')}>
-      <div className="arena-tile"><div ref={hostVideo} />{split && <span>Host</span>}</div>
-      <div className="arena-tile" hidden={!split}><div ref={guestVideo} /><span>{match?.guest_name}</span></div>
+    <div className={'arena-media' + layout + (fit ? ' fit' : '')} aria-label="LIVE video stage" data-tile-count={tiles.length}>
+      {tiles.map(tile => <StageTile key={tile.id} identity={tile.id} name={tile.name} track={videos[tile.id]?.track}
+        label={tiles.length > 1} featured={tile.id === spotlight} />)}
     </div>
     <div ref={audioBox} hidden />
     <div className="arena-top">
@@ -337,11 +396,21 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       <div className="arena-buttons">
         <button className="arena-action" aria-label={fit ? 'Fill screen' : 'Fit entire video'} title={fit ? 'Fill screen' : 'Fit entire video'} aria-pressed={fit} onClick={() => setFit(value => !value)}>{fit ? <Maximize size={18} /> : <Minimize size={18} />}</button>
         {connected && grant.shareCode && <button className="arena-action" aria-label="Share LIVE" title="Share LIVE" onClick={() => toggleDrawer('share')} aria-expanded={drawer === 'share'}><Share2 size={18} /></button>}
+        {connected && grant.host && <button className="arena-action" aria-label="Guest stage" title="Guest stage"
+          onClick={() => toggleDrawer('stage')} aria-expanded={drawer === 'stage'}><UsersRound size={18} /></button>}
         {canModerate && <button className="arena-action" aria-label="Moderation" title="Moderation" onClick={() => toggleDrawer('moderation')} aria-expanded={drawer === 'moderation'}><Shield size={18} /></button>}
         <button className="arena-action" aria-label={grant.host ? 'End broadcast' : 'Leave'} title={grant.host ? 'End broadcast' : 'Leave'} disabled={pending} onClick={exit}><X size={21} /></button>
       </div>
     </div>
     <div className="arena-match">
+      {connected && mySeat && !mySeat.on_stage && <section className="battle" aria-label="Stage invitation">
+        <strong>The host invited you on stage</strong>
+        <p>Joining turns on your camera and microphone.</p>
+        <div className="arena-buttons">
+          <button className="primary" disabled={pending} onClick={() => void stageAction({ action: 'accept', seatId: mySeat.id })}>Accept stage invite</button>
+          <button className="secondary" disabled={pending} onClick={() => void stageAction({ action: 'decline', seatId: mySeat.id })}>Decline stage invite</button>
+        </div>
+      </section>}
       {match?.status === 'running' && <section className="battle" aria-label="1v1 scoreboard">
         <div className="battle-head"><span><Swords size={17} /> 1v1 LIVE</span><strong>{countdown}</strong></div>
         <div className="battle-score">
@@ -359,7 +428,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
           }}>Forfeit match</button>}
         </div>
       </section>}
-      {match?.status === 'finished' && <section className="battle" aria-label="Match result">
+      {match?.status === 'finished' && !seats.length && <section className="battle" aria-label="Match result">
         <div className="battle-head"><span><Swords size={17} /> {match.winner_id === null ? 'Draw' : (match.winner_id === grant.hostId ? 'Host wins' : match.guest_name + ' wins')}</span>
           <strong>{match.host_score} – {match.guest_score}</strong></div>
         {match.outcome !== 'time' && <small>Match ended early.</small>}
@@ -376,8 +445,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
             {grant.host && connected && <button className="secondary" disabled={pending} onClick={() => void matchAction('cancel')}>Cancel challenge</button>}
           </div>
         </div>}
-      {match?.status === 'cancelled' && <p className="hint">Challenge {match.outcome === 'guest_removed' ? 'ended' : match.outcome}.</p>}
-      {grant.host && connected && (!match || ['finished','cancelled'].includes(match.status)) &&
+      {match?.status === 'cancelled' && !seats.length && <p className="hint">Challenge {match.outcome === 'guest_removed' ? 'ended' : match.outcome}.</p>}
+      {grant.host && connected && !battle && !seats.length &&
         <form className="inline" onSubmit={event => {
           event.preventDefault();
           const form = event.currentTarget;
@@ -420,6 +489,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
           <button className="arena-action" aria-label={mic ? 'Mute microphone' : 'Unmute microphone'} title={mic ? 'Mute microphone' : 'Unmute microphone'} disabled={pending} onClick={() => toggleDevice('mic')}>{mic ? <Mic size={19} /> : <MicOff size={19} />}</button>
           <button className="arena-action arena-pill" aria-label="Camera effects" aria-expanded={drawer === 'effects'} onClick={() => toggleDrawer('effects')}><Sparkles size={18} /> Effects</button>
         </>}
+        {connected && stageSeatId && <button className="arena-action" aria-label="Leave stage" title="Leave stage" disabled={pending}
+          onClick={() => void stageAction({ action: 'leave', seatId: stageSeatId })}><LogOut size={18} /></button>}
         {connected && user && !grant.host && <button className="arena-action" aria-label="Report broadcast" title="Report broadcast" onClick={() => setReporting({ id: grant.hostId, label: 'host' })}><Flag size={17} /></button>}
       </div>
       {reporting && <form className="inline" onSubmit={event => {
@@ -432,8 +503,11 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         <button className="primary" disabled={pending}>Submit report</button>
         <button type="button" className="secondary" onClick={() => setReporting(undefined)}>Cancel</button>
       </form>}
-      {liveNotice && <p className="arena-notice" role="status">{liveNotice}</p>}
-      {(error || snapshot?.error) && <p className="arena-notice error" role="alert">{error || snapshot?.error}</p>}
+      {stageMediaError && stageSeatId && <div className="arena-notice"><p role="alert">{stageMediaError}</p>
+        <button className="link" onClick={() => setCameraRetry(value => value + 1)}>Retry camera and mic</button>
+      </div>}
+      {liveNotice && drawer !== 'stage' && <p className="arena-notice" role="status">{liveNotice}</p>}
+      {(error || snapshot?.error) && drawer !== 'stage' && <p className="arena-notice error" role="alert">{error || snapshot?.error}</p>}
     </div>
     {drawer && <section className="arena-drawer" aria-label={drawerTitles[drawer]}>
       <div className="arena-drawer-heading">
@@ -452,6 +526,11 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       </div>}
       {drawer === 'moderation' && canModerate && state && user && <LiveModeration path={path} user={user} hostId={grant.hostId} chatOpen={state.room.chat_open}
         guestAccess={state.room.guest_access} messages={state.messages} pinnedId={state.room.pinned_id} revision={revision} ended={state.room.ended} onChange={sync} />}
+      {drawer === 'stage' && grant.host && connected && <>
+        <StageControls path={path} hostId={grant.hostId} seats={seats} spotlight={spotlight} revision={revision} pending={pending} battle={battle} onCommand={stageAction} />
+        {liveNotice && <p role="status">{liveNotice}</p>}
+        {(error || snapshot?.error) && <p className="error" role="alert">{error || snapshot?.error}</p>}
+      </>}
       {drawer === 'effects' && isPublisher && <>
         <p className="hint">{camera && localVideo ? 'Changes your camera for everyone watching.' : 'Turn on your camera to use effects.'}</p>
         <div className="arena-looks" aria-label="Camera presets">

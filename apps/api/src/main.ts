@@ -17,6 +17,7 @@ import { AdminController } from './admin';
 import { schema } from './schema';
 import { SocialController } from './social';
 import { LiveController, reconcileLive } from './live';
+import { LiveStageController } from './live-stage';
 import { LiveModerationController } from './live-moderation';
 import { playbackUrl, sweepCloudMedia, useR2 } from './media-storage';
 import { liveSchema } from './live-store';
@@ -41,7 +42,7 @@ class HealthController {
       return req.ip ?? req.socket.remoteAddress ?? 'unknown';
     },
   })],
-  controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, LiveModerationController, AdminController],
+  controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, LiveStageController, LiveModerationController, AdminController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 class AppModule {}
