@@ -364,8 +364,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       await send(path + '/stage', 'POST', command);
       const room = connection.current;
       if (command.action === 'leave' && room) await releaseGuestMedia(room).catch(() => undefined);
-    }, command.action === 'invite' || command.action === 'approve-request' ? 'Stage invitation sent.'
-      : command.action === 'request' ? 'Request sent to the host.' : '');
+    }, command.action === 'invite' || command.action === 'approve-request' ? 'Stage invitation sent.' : '');
   }
 
   function submit(event: FormEvent<HTMLFormElement>, endpoint: string, payload: object, notice?: string) {
@@ -566,6 +565,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       {stageMediaError && stageSeatId && <div className="arena-notice"><p role="alert">{stageMediaError}</p>
         <button className="link" onClick={() => setCameraRetry(value => value + 1)}>Retry camera and mic</button>
       </div>}
+      {requestedSeat && <p className="arena-notice" role="status">Waiting for the host to approve your request.</p>}
       {liveNotice && drawer !== 'stage' && <p className="arena-notice" role="status">{liveNotice}</p>}
       {(error || snapshot?.error) && drawer !== 'stage' && <p className="arena-notice error" role="alert">{error || snapshot?.error}</p>}
     </div>
