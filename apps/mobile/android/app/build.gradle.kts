@@ -20,7 +20,7 @@ if (releaseStore == null && !unsignedCi && gradle.startParameter.taskNames.any {
 android {
     namespace = "ke.co.tiktokmwitu.mwitu"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "29.0.13113456"
+    ndkVersion = providers.environmentVariable("MWITU_ANDROID_NDK").orNull ?: flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -4,7 +4,7 @@ Flutter owns the vertical For You feed, playback, navigation, app links, and sys
 
 ## Build Android
 
-Use Flutter 3.47.2 with the Android SDK and NDK 29.0.13113456. From `apps/mobile`:
+Use Flutter 3.47.2 with the Android SDK and the NDK selected by Flutter. Set `MWITU_ANDROID_NDK` to a locally installed version if needed. From `apps/mobile`:
 
 ```text
 flutter pub get
