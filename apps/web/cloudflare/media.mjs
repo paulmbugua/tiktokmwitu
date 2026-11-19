@@ -65,6 +65,7 @@ export async function handleMedia(request, url, env) {
     'ETag': info.httpEtag,
     'Content-Length': String(info.size),
   });
+  if (url.searchParams.get('download') === '1') headers.set('Content-Disposition', 'attachment; filename="mwitu-' + id + '.mp4"');
   if (method === 'HEAD') return new Response(null, { headers });
   if (!rangeHeader) return new Response(info.body, { headers });
   const range = readRange(rangeHeader, info.size);

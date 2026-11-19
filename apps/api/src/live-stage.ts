@@ -10,6 +10,7 @@ const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('invite'), handle: handleSchema }),
   z.object({ action: z.enum(['accept', 'decline', 'restore', 'leave', 'remove']), seatId: z.uuid() }),
   z.object({ action: z.literal('spotlight'), userId: z.uuid().nullable() }),
+  z.object({ action: z.literal('fullscreen'), userId: z.uuid(), enabled: z.boolean() }),
 ]);
 
 @Controller('live/:id/stage')
@@ -42,7 +43,7 @@ export class LiveStageController {
       requireOpen(room);
       await member(client, room, actor);
       const host = room.host_id === actor.id;
-      if (['invite', 'remove', 'spotlight'].includes(command.action) && !host) {
+      if (['invite', 'remove', 'spotlight', 'fullscreen'].includes(command.action) && !host) {
         throw new ForbiddenException('Only the host can manage the stage.');
       }
       let targetId: string | null;
@@ -55,7 +56,7 @@ export class LiveStageController {
         await member(client, room, guest);
         const seats = await client.query<{ user_id: string }>('SELECT user_id FROM live_stage_seats WHERE room_id=$1', [id]);
         if (seats.rows.some(seat => seat.user_id === guest.id)) return;
-        if (seats.rows.length >= stageCapacity) throw new ConflictException('All four guest seats are reserved.');
+        if (seats.rows.length >= stageCapacity) throw new ConflictException('All seven guest seats are reserved.');
         await client.query('INSERT INTO live_stage_seats(room_id,user_id) VALUES ($1,$2)', [id, guest.id]);
         targetId = guest.id;
       } else if (command.action === 'spotlight') {
@@ -64,7 +65,11 @@ export class LiveStageController {
           'SELECT 1 FROM live_stage_seats WHERE room_id=$1 AND user_id=$2 AND accepted_at IS NOT NULL', [id, targetId])).rowCount) {
           throw new ConflictException('That guest is no longer on stage.');
         }
-        await client.query('UPDATE live_rooms SET spotlight_id=$2 WHERE id=$1', [id, targetId]);
+        await client.query('UPDATE live_rooms SET spotlight_id=$2,spotlight_fullscreen=false WHERE id=$1', [id, targetId]);
+      } else if (command.action === 'fullscreen') {
+        targetId = command.userId;
+        if (room.spotlight_id !== targetId) throw new ConflictException('The spotlight changed. Select it again.');
+        await client.query('UPDATE live_rooms SET spotlight_fullscreen=$2 WHERE id=$1', [id, command.enabled]);
       } else {
         const { rows: [seat] } = await client.query<{ user_id: string; accepted_at: Date | null; expires_at: Date }>(
           'SELECT user_id,accepted_at,expires_at FROM live_stage_seats WHERE room_id=$1 AND id=$2', [id, command.seatId]);

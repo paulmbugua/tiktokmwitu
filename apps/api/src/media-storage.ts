@@ -21,10 +21,11 @@ function access(operation: string, url: URL) {
   return expires + '.' + signature;
 }
 
-export function playbackUrl(id: string) {
+export function playbackUrl(id: string, download = false) {
   if (!useR2) throw new ServiceUnavailableException('Cloud media storage is unavailable.');
   const url = objectUrl(id);
   url.searchParams.set('access', access('read', url));
+  if (download) url.searchParams.set('download', '1');
   return url.href;
 }
 

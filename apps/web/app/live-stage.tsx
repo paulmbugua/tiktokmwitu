@@ -6,11 +6,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useData, type Person } from './client';
 
 export type StageSeat = { id: string; user_id: string; display_name: string; handle: string; on_stage: boolean };
-export type StageState = { spotlight: string | null; seats: StageSeat[] };
+export type StageState = { spotlight: string | null; fullscreen: boolean; capacity: number; seats: StageSeat[] };
 export type StageCommand =
   | { action: 'invite'; handle: string }
   | { action: 'accept' | 'decline' | 'leave' | 'remove'; seatId: string }
-  | { action: 'spotlight'; userId: string | null };
+  | { action: 'spotlight'; userId: string | null }
+  | { action: 'fullscreen'; userId: string; enabled: boolean };
 
 export function StageTile({ name, track, identity, label, featured }: {
   name: string; track?: Track; identity: string; label: boolean; featured: boolean;
@@ -42,18 +43,18 @@ export function StageTile({ name, track, identity, label, featured }: {
   </div>;
 }
 
-export function StageControls({ path, hostId, seats, spotlight, revision, pending, battle, onCommand }: {
-  path: string; hostId: string; seats: StageSeat[]; spotlight: string | null; revision: number; pending: boolean; battle: boolean;
+export function StageControls({ path, hostId, seats, capacity, spotlight, revision, pending, battle, onCommand }: {
+  path: string; hostId: string; seats: StageSeat[]; capacity: number; spotlight: string | null; revision: number; pending: boolean; battle: boolean;
   onCommand: (command: StageCommand) => Promise<boolean>;
 }) {
   const audience = useData<Person[]>(battle ? null : path + '/stage/audience', revision);
   const [filter, setFilter] = useState('');
-  const full = seats.length >= 4;
+  const full = seats.length >= capacity;
   const people = audience?.data?.filter(person => (person.display_name + ' @' + person.handle).toLowerCase().includes(filter.trim().toLowerCase()));
   if (battle) return <p className="hint">Finish the 1v1 to invite stage guests.</p>;
   return <div className="stage-controls">
     <div className="stage-controls-heading">
-      <strong>Guest seats · {seats.length}/4</strong>
+      <strong>Guest seats · {seats.length}/{capacity}</strong>
       {seats.some(seat => seat.on_stage) && <div className="arena-buttons">
         {spotlight && <button className="secondary" disabled={pending} onClick={() => void onCommand({ action: 'spotlight', userId: null })}>
           <LayoutGrid size={15} /> Grid

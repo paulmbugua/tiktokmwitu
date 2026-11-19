@@ -21,6 +21,7 @@ ALTER TABLE live_rooms ALTER COLUMN share_code SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS live_room_share_code ON live_rooms(share_code);
 ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS guest_access boolean NOT NULL DEFAULT true;
 ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS spotlight_id uuid REFERENCES users ON DELETE SET NULL;
+ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS spotlight_fullscreen boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS live_stage_seats (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   room_id uuid NOT NULL REFERENCES live_rooms ON DELETE CASCADE,
@@ -94,25 +95,27 @@ CREATE TABLE IF NOT EXISTS live_reports (
 
 export type LiveRoom = {
   id: string; host_id: string; online_at: Date | null; ended_at: Date | null; created_at: Date;
-  chat_open: boolean; keywords: string[]; pinned_id: string | null; share_code: string; guest_access: boolean; spotlight_id: string | null;
+  chat_open: boolean; keywords: string[]; pinned_id: string | null; share_code: string; guest_access: boolean;
+  spotlight_id: string | null; spotlight_fullscreen: boolean;
 };
-export const stageCapacity = 4;
+export const stageCapacity = 7;
 
 export async function stageSnapshot(client: PoolClient, room: LiveRoom, userId: string | null) {
-  if (room.ended_at) return { spotlight: null, seats: [] };
+  if (room.ended_at) return { spotlight: null, fullscreen: false, capacity: stageCapacity, seats: [] };
   const { rows: seats } = await client.query(`
     SELECT s.id,s.user_id,u.display_name,u.handle,s.accepted_at IS NOT NULL AS on_stage
     FROM live_stage_seats s JOIN users u ON u.id=s.user_id
     WHERE s.room_id=$1 AND (s.accepted_at IS NOT NULL OR
       (s.expires_at>clock_timestamp() AND ($2::uuid=$3::uuid OR s.user_id=$2)))
     ORDER BY s.invited_at,s.id`, [room.id, userId, room.host_id]);
-  return { spotlight: seats.some(seat => seat.on_stage && seat.user_id === room.spotlight_id) || room.spotlight_id === room.host_id
-    ? room.spotlight_id : null, seats };
+  const spotlight = seats.some(seat => seat.on_stage && seat.user_id === room.spotlight_id) || room.spotlight_id === room.host_id
+    ? room.spotlight_id : null;
+  return { spotlight, fullscreen: !!spotlight && room.spotlight_fullscreen, capacity: stageCapacity, seats };
 }
 
 export async function dropStageSeat(client: PoolClient, roomId: string, userId: string) {
   await client.query('DELETE FROM live_stage_seats WHERE room_id=$1 AND user_id=$2', [roomId, userId]);
-  await client.query('UPDATE live_rooms SET spotlight_id=NULL WHERE id=$1 AND spotlight_id=$2', [roomId, userId]);
+  await client.query('UPDATE live_rooms SET spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1 AND spotlight_id=$2', [roomId, userId]);
 }
 export type Match = {
   id: string; room_id: string; guest_id: string; status: 'invited' | 'ready' | 'running' | 'finished' | 'cancelled';

@@ -1,8 +1,8 @@
 'use client';
 
-import { Camera, CameraOff, Flag, Heart, LogOut, Maximize, MessageCircle, Mic, MicOff, Minimize, Send, Share2, Shield, Sparkles, Swords, UsersRound, X } from 'lucide-react';
+import { Camera, CameraOff, Expand, Flag, Heart, LayoutGrid, LogOut, Maximize, MessageCircle, Mic, MicOff, Minimize, Send, Share2, Shield, Sparkles, Swords, UsersRound, X } from 'lucide-react';
 import { LocalVideoTrack, Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { send, useData, type Person } from './client';
 import LiveModeration from './live-controls';
 import { CameraEffects, cameraLooks, type CameraLook } from './live-effects';
@@ -84,6 +84,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const isPublisher = grant.host || activeGuest === user?.id || !!stageSeatId;
   const stageGuests = seats.filter(seat => seat.on_stage);
   const spotlight = stageGuests.length > 0 && !split ? state?.stage?.spotlight ?? null : null;
+  const fullscreen = !!spotlight && state?.stage?.fullscreen === true;
   const canModerate = state?.self.role === 'host' || state?.self.role === 'moderator';
   const chatAllowed = canModerate || (state?.room.chat_open && (!state.self.mutedUntil || new Date(state.self.mutedUntil).getTime() <= clock));
   const sync = () => setRevision(value => value + 1);
@@ -381,13 +382,19 @@ export default function Broadcast({ grant, user, signIn, leave }: {
     ...(activeGuest ? [{ id: activeGuest, name: match!.guest_name }]
       : stageGuests.map(seat => ({ id: seat.user_id, name: seat.display_name }))),
   ];
-  const layout = split ? ' split' : spotlight ? ' spotlight-stage' : stageGuests.length ? ' grid-stage' : '';
+  const layout = split ? ' split' : spotlight ? ' spotlight-stage' + (fullscreen ? ' spotlight-fullscreen' : '') : stageGuests.length ? ' grid-stage' : '';
 
   return <div className="arena">
-    <div className={'arena-media' + layout + (fit ? ' fit' : '')} aria-label="LIVE video stage" data-tile-count={tiles.length}>
+    <div className={'arena-media' + layout + (fit ? ' fit' : '')} aria-label="LIVE video stage" data-tile-count={tiles.length}
+      style={{ '--rail-rows': Math.max(1, Math.ceil((tiles.length - 1) / 2)) } as CSSProperties}>
       {tiles.map(tile => <StageTile key={tile.id} identity={tile.id} name={tile.name} track={videos[tile.id]?.track}
         label={tiles.length > 1} featured={tile.id === spotlight} />)}
     </div>
+    {connected && grant.host && spotlight && <button className="arena-action arena-pill arena-focus-toggle" disabled={pending}
+      onClick={() => void stageAction({ action: 'fullscreen', userId: spotlight, enabled: !fullscreen })}>
+      {fullscreen ? <LayoutGrid size={16} /> : <Expand size={16} />}
+      {fullscreen ? 'Restore guest tiles' : 'Maximize spotlight'}
+    </button>}
     <div ref={audioBox} hidden />
     <div className="arena-top">
       <span className={'arena-status' + (connected && !state?.room.ended ? ' on-air' : '')} role="status">
@@ -527,7 +534,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       {drawer === 'moderation' && canModerate && state && user && <LiveModeration path={path} user={user} hostId={grant.hostId} chatOpen={state.room.chat_open}
         guestAccess={state.room.guest_access} messages={state.messages} pinnedId={state.room.pinned_id} revision={revision} ended={state.room.ended} onChange={sync} />}
       {drawer === 'stage' && grant.host && connected && <>
-        <StageControls path={path} hostId={grant.hostId} seats={seats} spotlight={spotlight} revision={revision} pending={pending} battle={battle} onCommand={stageAction} />
+        <StageControls path={path} hostId={grant.hostId} seats={seats} capacity={state?.stage?.capacity ?? 7}
+          spotlight={spotlight} revision={revision} pending={pending} battle={battle} onCommand={stageAction} />
         {liveNotice && <p role="status">{liveNotice}</p>}
         {(error || snapshot?.error) && <p className="error" role="alert">{error || snapshot?.error}</p>}
       </>}

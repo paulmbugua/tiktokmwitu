@@ -41,11 +41,11 @@ function Dialog({ title, close, children }: { title: string; close: () => void; 
   </dialog>;
 }
 
-function Action({ icon, label, onClick, active = false, count }: {
-  icon: ReactNode; label: string; onClick: () => void; active?: boolean; count?: number;
+function Action({ icon, label, caption, onClick, active, count }: {
+  icon: ReactNode; label: string; caption?: string; onClick: () => void; active?: boolean; count?: number;
 }) {
-  return <button className={'action' + (active ? ' active' : '')} onClick={onClick} aria-label={label}>
-    <span>{icon}</span>{count === undefined ? <small>{label}</small> : <small>{num.format(count)}</small>}
+  return <button className={'action' + (active ? ' active' : '')} onClick={onClick} aria-label={label} aria-pressed={active} title={label}>
+    <span>{icon}</span><small>{caption ?? label}{count === undefined ? '' : ' · ' + num.format(count)}</small>
   </button>;
 }
 
@@ -382,24 +382,29 @@ export default function Home() {
         }}>
           {clips.map(video => <Clip key={video.id} video={video} root={root} muted={muted} onMute={() => setMuted(!muted)}
             profile={() => open({ kind: 'profile', handle: video.handle })}
-            manage={user?.id === video.creator_id
-              ? <button className="icon" aria-label="Delete video" onClick={() => {
-                if (confirm('Permanently delete this video?')) void change('/videos/' + video.id, 'DELETE');
-              }}><Trash2 size={17} /></button>
-              : <button className="icon" aria-label="Report video" onClick={() => protectedPanel({ kind: 'report', video })}><Flag size={17} /></button>}>
+            manage={<div className="clip-utilities">
+              <button className="icon" aria-label="Share" title="Share" onClick={() => void share(video.id)}><Share2 size={18} /></button>
+              {user?.id === video.creator_id
+                ? <button className="icon" aria-label="Delete video" onClick={() => {
+                  if (confirm('Permanently delete this video?')) void change('/videos/' + video.id, 'DELETE');
+                }}><Trash2 size={17} /></button>
+                : <button className="icon" aria-label="Report video" onClick={() => protectedPanel({ kind: 'report', video })}><Flag size={17} /></button>}
+            </div>}>
             {user?.id === video.creator_id
               ? <Action icon={<UserRound size={21} />} label="Profile" onClick={() => open({ kind: 'profile', handle: video.handle })} />
               : <Action icon={video.following ? <Check size={21} /> : <Plus size={22} />} label={video.following ? 'Following' : 'Follow'}
                 active={video.following} onClick={() => change('/creators/' + video.handle + '/follow', 'PUT', { enabled: !video.following },
                   item => item.creator_id === video.creator_id ? { ...item, following: !video.following } : item)} />}
-            <Action icon={<Heart size={22} fill={video.liked ? 'currentColor' : 'none'} />} label={video.liked ? 'Unlike' : 'Like'}
+            <Action icon={<Heart size={22} fill={video.liked ? 'currentColor' : 'none'} />} label={video.liked ? 'Unlike' : 'Like'} caption="Like"
               count={video.likes} active={video.liked} onClick={() => change('/videos/' + video.id + '/like', 'PUT', { enabled: !video.liked },
                 item => item.id === video.id ? { ...item, liked: !video.liked, likes: Math.max(0, item.likes + (video.liked ? -1 : 1)) } : item)} />
             <Action icon={<MessageCircle size={22} />} label="Comments" count={video.comments} onClick={() => open({ kind: 'comments', video })} />
-            <Action icon={<Bookmark size={21} fill={video.saved ? 'currentColor' : 'none'} />} label={video.saved ? 'Saved' : 'Save'}
+            <a className="action" href={mediaUrl(video.id) + '?download=1'} download aria-label="Save video" title="Save video">
+              <span><ArrowDownToLine size={21} /></span><small>Save</small>
+            </a>
+            <Action icon={<Bookmark size={21} fill={video.saved ? 'currentColor' : 'none'} />} label={video.saved ? 'Remove bookmark' : 'Bookmark'} caption="Bookmark"
               active={video.saved} onClick={() => change('/videos/' + video.id + '/save', 'PUT', { enabled: !video.saved },
                 item => item.id === video.id ? { ...item, saved: !video.saved } : item)} />
-            <Action icon={<Share2 size={21} />} label="Share" onClick={() => void share(video.id)} />
           </Clip>)}
           {!clips.length && <div className="empty">
             <div className="empty-art" aria-hidden="true"><div className="art-inner"><Clapperboard size={52} strokeWidth={1.5} /></div></div>

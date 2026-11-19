@@ -70,7 +70,7 @@ export async function finishRoom(id: string, outcome: string, moderator?: Person
     await settle(client, room);
     await endMatch(client, room, outcome, moderator ? undefined : room.host_id);
     await client.query('DELETE FROM live_stage_seats WHERE room_id=$1', [id]);
-    await client.query('UPDATE live_rooms SET ended_at=now(),spotlight_id=NULL WHERE id=$1', [id]);
+    await client.query('UPDATE live_rooms SET ended_at=now(),spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1', [id]);
     if (moderator) {
       await client.query('DELETE FROM live_reports WHERE room_id=$1', [id]);
       await client.query(`INSERT INTO live_audit(room_id,actor_id,action,details)
@@ -126,7 +126,7 @@ export async function reconcileLive() {
             ((accepted_at IS NULL AND expires_at<=now()) OR missing_since<=now()-interval '25 seconds')
           RETURNING user_id`, [room.id]);
         if (expired.length) {
-          await client.query('UPDATE live_rooms SET spotlight_id=NULL WHERE id=$1 AND spotlight_id=ANY($2::uuid[])',
+          await client.query('UPDATE live_rooms SET spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1 AND spotlight_id=ANY($2::uuid[])',
             [room.id, expired.map(seat => seat.user_id)]);
           updated = true;
         }
@@ -338,7 +338,7 @@ export class LiveController {
           AND (accepted_at IS NOT NULL OR expires_at>clock_timestamp()) LIMIT 1`, [id])).rowCount) {
           throw new ConflictException('Clear the guest stage before starting a 1v1.');
         }
-        await client.query('UPDATE live_rooms SET spotlight_id=NULL WHERE id=$1 AND spotlight_id IS NOT NULL', [id]);
+        await client.query('UPDATE live_rooms SET spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1 AND spotlight_id IS NOT NULL', [id]);
         const { rows: [guest] } = await client.query<Person>('SELECT id,handle,display_name FROM users WHERE handle=$1', [command.handle]);
         if (!guest || guest.id === user.id) throw new NotFoundException('Choose another Tiktok mwitu account.');
         await member(client, room, guest);

@@ -81,11 +81,13 @@ async function start() {
     try {
       const video = await db.query<{ media_storage: string }>('SELECT media_storage FROM videos WHERE id=$1', [match[1]]);
       if (!video.rowCount) { res.sendStatus(404); return; }
+      const download = req.query.download === '1';
       if (video.rows[0].media_storage === 'r2') {
         res.setHeader('Cache-Control', 'private, no-store');
-        res.redirect(307, playbackUrl(match[1]));
+        res.redirect(307, playbackUrl(match[1], download));
         return;
       }
+      if (download) res.setHeader('Content-Disposition', 'attachment; filename="mwitu-' + match[1] + '.mp4"');
       next();
     } catch (error) { next(error); }
   });
