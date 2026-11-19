@@ -1,6 +1,7 @@
 import { Body, ConflictException, Controller, ForbiddenException, Get, NotFoundException, Param, Post, Req, Res, ServiceUnavailableException } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
+import type { PoolClient } from 'pg';
 import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { AccessToken, DataPacket_Kind, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
@@ -19,6 +20,17 @@ const service = url && internalUrl && key && secret
 export const roomName = (id: string) => 'mwitu-' + id;
 const encoder = new TextEncoder();
 export const guestIdentityPrefix = 'guest:';
+
+async function roomMessages(client: PoolClient, room: LiveRoom, guest = false) {
+  const { rows } = await client.query(`
+    SELECT id,user_id,body,handle FROM (
+      SELECT m.id,m.user_id,m.body,u.handle,m.created_at
+      FROM live_messages m JOIN users u ON u.id=m.user_id
+      WHERE m.room_id=$1 AND m.deleted_at IS NULL
+      ORDER BY (m.id=$2) DESC NULLS LAST,m.created_at DESC,m.id DESC LIMIT 60
+    ) recent ORDER BY created_at,id`, [room.id, room.pinned_id]);
+  return guest ? rows.map(({ id, body, handle }) => ({ id, body, handle })) : rows;
+}
 
 async function handoffRoom(raw: string) {
   const code = normalizeInvite(raw);
@@ -257,10 +269,12 @@ export class LiveController {
         [fresh.id]);
       return {
         self: { role: 'guest', mutedUntil: null },
-        room: { id: fresh.id, ended: !!fresh.ended_at, guest_access: fresh.guest_access, chat_open: false, pinned_id: null },
+        room: { id: fresh.id, ended: !!fresh.ended_at, guest_access: fresh.guest_access, chat_open: false,
+          pinned_id: fresh.guest_access ? fresh.pinned_id : null },
         match: fresh.guest_access && match ? {...match, guests:await matchGuests(client,match.id)} : undefined,
         stage: fresh.guest_access ? await stageSnapshot(client, fresh, null) : undefined,
-        messages: [], gifts: fresh.guest_access ? await recentGifts(client, fresh.id) : [], now: Date.now(),
+        messages: fresh.guest_access && !fresh.ended_at ? await roomMessages(client, fresh, true) : [],
+        gifts: fresh.guest_access ? await recentGifts(client, fresh.id) : [], now: Date.now(),
       };
     });
   }
@@ -319,14 +333,10 @@ export class LiveController {
         FROM live_matches m JOIN users u ON u.id=m.guest_id
         LEFT JOIN live_votes v ON v.match_id=m.id AND v.user_id=$2 WHERE m.room_id=$1
         ORDER BY m.updated_at DESC,m.id DESC LIMIT 1`, [room.id, user.id]);
-      const { rows: messages } = await client.query(`
-        SELECT m.id,m.user_id,m.body,u.handle FROM live_messages m JOIN users u ON u.id=m.user_id
-        WHERE m.room_id=$1 AND m.deleted_at IS NULL ORDER BY (m.id=$2) DESC NULLS LAST,m.created_at DESC,m.id DESC LIMIT 60`,
-        [room.id, room.pinned_id]);
       return {
         self, hostProfile, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
         match:match?{...match,guests:await matchGuests(client,match.id)}:undefined,
-        stage: await stageSnapshot(client, room, user.id), messages: messages.reverse(),
+        stage: await stageSnapshot(client, room, user.id), messages: await roomMessages(client, room),
         gifts: await recentGifts(client, room.id), now: Date.now(),
       };
     });

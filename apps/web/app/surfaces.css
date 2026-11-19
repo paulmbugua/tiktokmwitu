@@ -241,6 +241,45 @@ dialog:has(.arena) { background: #100c17; }
 .arena .live-chat { font-size: .875rem; }
 .live-message { background: #21182bec; border: 1px solid #ffffff17; border-radius: 15px; }
 .live-message strong { color: #e6cdff; }
+.live-chat-stream, .arena .live-chat { position: relative; min-width: 0; }
+.live-chat-stream:has(.live-chat:empty):not(:has(.live-chat-latest)) { display: none; }
+.live-chat-latest {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  z-index: 1;
+  min-height: 32px;
+  padding: 4px 9px;
+  background: #3b2c4c;
+  font-size: .8125rem;
+}
+.arena-docked .arena-conversation {
+  width: min(660px, 100%);
+  justify-self: center;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid #ffffff1d;
+  border-radius: 16px;
+  background: #21192cea;
+}
+.arena-docked .arena-media:is(.grid-stage,.spotlight-stage,.battle-stage) {
+  left: var(--live-left);
+  right: var(--live-right);
+}
+.arena-docked .live-chat {
+  height: clamp(90px, 18dvh, 150px);
+  max-height: none;
+  padding-right: 5px;
+  scrollbar-color: #85679c transparent;
+}
+.arena-docked .live-message { padding: 4px 8px; margin-right: 4px; }
+.arena-docked .pinned { max-height: 2.8em; font-size: .8125rem; }
+.live-chat-empty { place-self: center; margin: auto 0; padding: 6px; color: var(--muted); }
+.arena-docked .arena-tools { justify-self: center; }
+@media(max-height:540px) {
+  .arena-docked .arena-conversation { width: min(660px, 100%); padding-block: 5px; }
+  .arena-docked .live-chat { height: clamp(42px, 13dvh, 68px); }
+}
 .arena .live-mod, .arena .battle { background: #21182bec; border-color: #594768; border-radius: 16px; }
 .stage-people li { border-color: #ffffff1a; }
 .arena-tools { gap: 6px; }

@@ -11,11 +11,13 @@ import LiveGifts, { GiftEffects, type GiftEvent } from './live-gifts';
 import LiveInvitePlans from './live-invite-plans';
 import Promote from './promote';
 import ChallengeSetup from './live-challenge';
+import LiveChatLog, { type ChatLine } from './live-chat-log';
+
+export type { ChatLine } from './live-chat-log';
 
 const drawerTitles = { share: 'Share LIVE', moderation: 'Moderation', effects: 'Camera effects', stage: 'Guest stage', gifts: 'LIVE gifts', promote: 'Promote', challenge:'LIVE challenge' };
 
 export type Grant = { id: string; url: string; token: string; host: boolean; guest?: boolean; hostId: string; shareCode?: string };
-export type ChatLine = { id: string; user_id: string; handle: string; body: string };
 type Match = {
   id: string; guest_id: string; guest_name: string;
   status: 'invited' | 'ready' | 'running' | 'finished' | 'cancelled';
@@ -44,9 +46,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
 }) {
   const audioBox = useRef<HTMLDivElement>(null);
   const arena = useRef<HTMLDivElement>(null);
-  const controls = useRef<HTMLDivElement>(null);
-  const chatList = useRef<HTMLDivElement>(null);
-  const followChat = useRef(true);
+  const footer = useRef<HTMLDivElement>(null);
   const connection = useRef<Room | null>(null);
   const prepared = useRef<string | null>(null);
   const preparedSeat = useRef<string | null>(null);
@@ -100,6 +100,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const stageGuests = seats.filter(seat => seat.on_stage);
   const spotlight = stageGuests.length > 0 && !split ? state?.stage?.spotlight ?? null : null;
   const fullscreen = !!spotlight && state?.stage?.fullscreen === true;
+  const docked = !fullscreen && (split || stageGuests.length > 0);
   const canModerate = state?.self.role === 'host' || state?.self.role === 'moderator';
   const chatAllowed = canModerate || (state?.room.chat_open && (!state.self.mutedUntil || new Date(state.self.mutedUntil).getTime() <= clock));
   const sync = () => setRevision(value => value + 1);
@@ -285,22 +286,19 @@ export default function Broadcast({ grant, user, signIn, leave }: {
 
   useEffect(()=>{
     const root=arena.current;
-    const tools=controls.current;
-    if(!root||!tools)return;
-    const composer=root.querySelector('.arena-conversation form');
+    const foot=footer.current;
+    if(!root||!foot)return;
     const hud=root.querySelector('.arena-match');
     const update=()=>{
-      root.style.setProperty('--stage-controls-height',Math.ceil(tools.getBoundingClientRect().height+
-        (composer?.getBoundingClientRect().height??0)+14)+'px');
+      root.style.setProperty('--stage-controls-height',Math.ceil(foot.getBoundingClientRect().height+10)+'px');
       root.style.setProperty('--stage-hud-height',Math.ceil(hud?.getBoundingClientRect().height??0)+'px');
     };
     const observer=new ResizeObserver(update);
-    observer.observe(tools);
-    if(composer)observer.observe(composer);
+    observer.observe(foot);
     if(hud)observer.observe(hud);
     update();
     return ()=>observer.disconnect();
-  },[connected,chatAllowed,hideChat]);
+  },[]);
 
   useEffect(() => {
     if (!stageSeatId) {
@@ -336,11 +334,6 @@ export default function Broadcast({ grant, user, signIn, leave }: {
     const room = connection.current;
     if (room) void releaseGuestMedia(room).catch(() => undefined);
   }, [grant.host, isPublisher]);
-
-  useEffect(() => {
-    const node = chatList.current;
-    if (node && followChat.current) node.scrollTop = node.scrollHeight;
-  }, [state?.messages.at(-1)?.id, hideChat, state?.room.pinned_id]);
 
   useEffect(() => {
     setLook(cameraLooks[0]);
@@ -415,7 +408,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const layout = split ? (four?' battle-stage battle-four':' split battle-stage') : spotlight ? ' spotlight-stage' + (fullscreen ? ' spotlight-fullscreen' : '') : grid ? ' grid-stage' : '';
   const fitAllowed=!split&&!grid&&(!spotlight||fullscreen);
 
-  return <div className="arena" ref={arena}>
+  return <div className={'arena'+(docked?' arena-docked':'')} ref={arena}>
     <div className={'arena-media' + layout + (fit&&fitAllowed ? ' fit' : '')} aria-label="LIVE video stage" data-tile-count={tiles.length} data-layout-cards={grid?cards:undefined}
       style={{ '--rail-rows': Math.max(1, Math.ceil((tiles.length - 1) / 2)), '--grid-rows':cards/2 } as CSSProperties}>
       {tiles.map(tile => <StageTile key={tile.id} identity={tile.id} name={tile.name} track={videos[tile.id]?.track}
@@ -492,18 +485,11 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       </div>}
       {match?.status==='cancelled'&&!seats.length&&<p className="hint">Challenge {match.outcome==='guest_removed'?'ended':match.outcome}.</p>}
     </div>
-    <div className="arena-foot">
+    <div className="arena-foot" ref={footer}>
       {!hideChat && <div className="arena-conversation">
         {pinned && <p className="pinned"><strong>Pinned · @{pinned.handle}</strong> {pinned.body}</p>}
-        <div className="live-chat" ref={chatList} role="log" aria-label="LIVE chat" onScroll={event => {
-          const node = event.currentTarget;
-          followChat.current = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
-        }}>
-          {state?.messages.filter(message => message.id !== pinned?.id).map(message =>
-            <div key={message.id} className="live-message"><p><strong>@{message.handle}</strong> {message.body}</p>
-              {connected && user && message.user_id !== user.id && <button className="link" onClick={() => setReporting({ id: message.user_id, label: '@' + message.handle })}>Report</button>}
-            </div>)}
-        </div>
+        <LiveChatLog messages={state?.messages??[]} pinned={pinned?.id} viewerId={connected?user?.id:undefined}
+          docked={docked} report={setReporting} />
         {connected && user && chatAllowed ? <form className="inline" onSubmit={event => submit(event, '/chat', { body: new FormData(event.currentTarget).get('body') })}>
           <input name="body" aria-label="Live chat message" placeholder="Chat with the room…" maxLength={300} required />
           <button className="primary" disabled={pending} aria-label="Send chat message"><Send size={17} /></button>
@@ -513,11 +499,9 @@ export default function Broadcast({ grant, user, signIn, leave }: {
           <button className="link" onClick={signIn}>Sign in to chat or vote</button>
         </div>}
       </div>}
-      <div className="arena-buttons arena-tools" ref={controls}>
-        <button className="arena-action" aria-label={hideChat ? 'Show chat' : 'Hide chat'} title={hideChat ? 'Show chat' : 'Hide chat'} aria-pressed={!hideChat} onClick={() => {
-          followChat.current = true;
-          setHideChat(value => !value);
-        }}><MessageCircle size={19} /></button>
+      <div className="arena-buttons arena-tools">
+        <button className="arena-action" aria-label={hideChat ? 'Show chat' : 'Hide chat'} title={hideChat ? 'Show chat' : 'Hide chat'} aria-pressed={!hideChat}
+          onClick={() => setHideChat(value => !value)}><MessageCircle size={19} /></button>
         {enableAudio && <button className="arena-action arena-pill" onClick={() => void connection.current?.startAudio().catch(() => setError('Could not enable audio.'))}>Enable sound</button>}
         {connected&&user&&!grant.host&&state?.hostProfile&&<button className="arena-action arena-pill" disabled={pending}
           aria-pressed={state.hostProfile.following} onClick={()=>{
