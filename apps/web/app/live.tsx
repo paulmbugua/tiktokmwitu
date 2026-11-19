@@ -5,10 +5,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyRound, Radio } from 'lucide-react';
 import { send, useData, type Person } from './client';
 import Broadcast, { type Grant } from './live-broadcast';
+import LiveInvitePlans from './live-invite-plans';
 import { promotionAction, promotionEvent, usePlacementView, type Placement } from './promote';
 
 type Listing = { enabled: boolean; rooms: Array<Person & { viewers: number; host_id: string }> };
 type RoomPreview = Pick<Person, 'id' | 'handle' | 'display_name'> & { guestAccess: boolean };
+type HostingEligibility = { followers: number; minimumFollowers: number; hasActivePlan: boolean; canStart: boolean };
 const normalize = (value: string) => value.trim().replace(/[\s-]+/g, '').toUpperCase();
 const shortCode = /^\d{6}$/;
 const validCode = /^(?:\d{6}|[0-9A-F]{16})$/;
@@ -20,11 +22,14 @@ export default function Live({ user, sessionReady, initialCode, resume, roomId, 
   const [grant, setGrant] = useState<Grant | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
+  const [showPlans, setShowPlans] = useState(false);
   const [code, setCode] = useState(normalize(initialCode ?? ''));
   const [codeInput, setCodeInput] = useState(initialCode ?? '');
   const resumed = useRef(false);
   const autoJoined = useRef('');
   const listing = useData<Listing>(grant || code ? null : '/live', revision);
+  const eligibility = useData<HostingEligibility>(user && !grant && !code && !showPlans ? '/live/eligibility' : null, revision);
+  const hosting = eligibility?.data;
   const placement=useData<Placement|null>(!grant&&!code?'/promote/placement?surface=live':null)?.data;
   const promoted=listing?.data?.rooms.find(room=>room.id===placement?.liveId);
   const [adRef,setAdRef]=useState<HTMLElement|null>(null);
@@ -42,7 +47,10 @@ export default function Live({ user, sessionReady, initialCode, resume, roomId, 
     setPending(true);
     setError('');
     try { setGrant(await send<Grant>(handoffCode ? '/live/handoff/'+handoffCode+'/join' : id ? '/live/' + id + '/join' : '/live/start', 'POST')); }
-    catch (error) { setError((error as Error).message); }
+    catch (error) {
+      setError((error as Error).message);
+      if (!id && !handoffCode) setRevision(value => value + 1);
+    }
     finally { setPending(false); }
   }, [signIn, user]);
 
@@ -109,6 +117,14 @@ export default function Live({ user, sessionReady, initialCode, resume, roomId, 
       <button className="secondary" disabled={pending} onClick={browse}>{shortCode.test(code)?'Enter a different code':'Browse LIVE'}</button>
     </div>
   </section>;
+  if (showPlans && user) return <>
+    <button className="link" onClick={() => {
+      setShowPlans(false);
+      setError('');
+      setRevision(value => value + 1);
+    }}>Back to LIVE</button>
+    <LiveInvitePlans />
+  </>;
   return <>
     <form className="live-code-form" onSubmit={event => {
       event.preventDefault();
@@ -137,7 +153,15 @@ export default function Live({ user, sessionReady, initialCode, resume, roomId, 
         : !listing.data.enabled ? 'Live broadcasts are unavailable.'
         : listing.data.rooms.length === 0 ? 'No one is live right now.' : '')}</p>
     </div>
-    {listing?.data?.enabled && <button className="primary live-start" disabled={pending} onClick={() => void join()}><Radio size={18} /> Go live</button>}
+    {listing?.data?.enabled && <>
+      <button className="primary live-start" disabled={pending || (!!user && !hosting?.canStart)} onClick={() => void join()}><Radio size={18} /> Go live</button>
+      {user && !hosting && <p className="hint" role="status">{eligibility?.error ?? 'Checking your LIVE eligibility…'}</p>}
+      {hosting && !hosting.canStart && <>
+        <p className="hint">You have {hosting.followers} of the {hosting.minimumFollowers} followers required to go LIVE. Both weekly invite plans let you go LIVE at any follower count.</p>
+        <button className="secondary" onClick={() => setShowPlans(true)}>View weekly LIVE invite plans</button>
+      </>}
+      {hosting?.hasActivePlan && <p className="hint">Your weekly invite plan lets you go LIVE at any follower count.</p>}
+    </>}
     {error && <p className="error" role="alert">{error}</p>}
   </>;
 }

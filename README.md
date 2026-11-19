@@ -82,7 +82,7 @@ Open **Moderation** inside a broadcast to appoint room moderators, turn viewer c
 
 ### Bring an audience to Tiktok mwitu
 
-Start a LIVE and open **Share LIVE**. Activate a seven-day invite plan with 1,000 coins for five codes per day or 2,000 coins for ten codes per day. Read the same six-digit code to your audience or copy the link. Viewers enter it in Mwitu's **LIVE** menu and are taken to your broadcast. Guests can watch without an account when guest watching is enabled. Each new code can be used by multiple viewers until the broadcast ends, the plan ends, or 24 hours pass. Daily limits count codes created and reset at midnight in Nairobi. Previously issued 16-character links keep their original single-viewer behavior.
+You need 200 followers to start a LIVE. An active weekly invite plan lets you start at any follower count. You can activate the seven-day plan in the **LIVE** menu before starting. It costs 1,000 coins for five codes per day or 2,000 coins for ten codes per day. Start a LIVE and open **Share LIVE**. Read the same six-digit code to your audience or copy the link. Viewers enter it in Mwitu's **LIVE** menu and are taken to your broadcast. Guests can watch without an account when guest watching is enabled. Each new code can be used by multiple viewers until the broadcast ends, the plan ends, or 24 hours pass. Daily limits count codes created and reset at midnight in Nairobi. Previously issued 16-character links keep their original single-viewer behavior.
 
 For a 1v1 handoff, reserve the challenger’s seat using their Tiktok mwitu handle before sharing. The reservation lasts five minutes. The invited account can accept and enable its camera on arrival. Everyone else joins as a viewer.
 

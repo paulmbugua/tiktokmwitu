@@ -20,6 +20,11 @@ const service = url && internalUrl && key && secret
 export const roomName = (id: string) => 'mwitu-' + id;
 const encoder = new TextEncoder();
 export const guestIdentityPrefix = 'guest:';
+const minimumFollowers = 200;
+const hostingEligibility = `
+  SELECT (SELECT count(*)::int FROM follows WHERE creator_id=$1) AS followers,
+    EXISTS (SELECT 1 FROM live_invite_plans WHERE user_id=$1 AND ends_at>statement_timestamp()) AS "hasActivePlan"`;
+type HostingEligibility = { followers: number; hasActivePlan: boolean };
 
 async function roomMessages(client: PoolClient, room: LiveRoom, guest = false) {
   const { rows } = await client.query(`
@@ -190,14 +195,28 @@ export class LiveController {
     return { enabled: true, rooms: rows.map(room => ({ ...room, viewers: Math.max(0, (counts.get(roomName(room.id)) ?? 1) - 1) })) };
   }
 
+  @Get('eligibility')
+  async eligibility(@Req() req: Request) {
+    const user = await requireUser(req);
+    const { rows: [status] } = await db.query<HostingEligibility>(hostingEligibility, [user.id]);
+    return { ...status, minimumFollowers, canStart: status.hasActivePlan || status.followers >= minimumFollowers };
+  }
+
   @Post('start')
   @Throttle({ default: { ttl: 60000, limit: 8 } })
   async start(@Req() req: Request) {
     const user = await requireUser(req);
     liveService();
-    const { rows: [room] } = await db.query<LiveRoom>(`
-      INSERT INTO live_rooms(host_id) VALUES ($1)
-      ON CONFLICT(host_id) WHERE ended_at IS NULL DO NOTHING RETURNING *`, [user.id]);
+    const { rows: [{ eligible, room }] } = await db.query<{ eligible: boolean; room: LiveRoom | null }>(`
+      WITH status AS (${hostingEligibility}), eligibility AS (
+        SELECT followers >= $2 OR "hasActivePlan" AS eligible FROM status
+      ), started AS (
+        INSERT INTO live_rooms(host_id) SELECT $1 FROM eligibility WHERE eligible
+        ON CONFLICT(host_id) WHERE ended_at IS NULL DO NOTHING RETURNING *
+      )
+      SELECT eligible, (SELECT row_to_json(started) FROM started) AS room FROM eligibility`,
+      [user.id, minimumFollowers]);
+    if (!eligible) throw new ForbiddenException(`You need ${minimumFollowers} followers or an active weekly LIVE invite plan to start a broadcast.`);
     if (!room) throw new ConflictException('You already have an active LIVE. Reopen it from the LIVE list.');
     return grant(room, user);
   }

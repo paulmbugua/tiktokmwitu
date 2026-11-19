@@ -44,7 +44,7 @@ export default function LiveInvitePlans({ roomId }: {roomId?:string}) {
         </div>
       </div>)}
     </> : <>
-      <p className="hint">Read one six-digit code to your audience. They can watch without an account when guest watching is on.</p>
+      <p className="hint">Both weekly plans let you go LIVE at any follower count and share six-digit invite codes. Viewers can watch without an account when guest watching is on.</p>
       {data?.plans.map(plan=><button key={plan.coins} className="secondary" disabled={busy||data.balance<plan.coins}
         onClick={()=>void act(String(plan.coins),'/live-invites/purchase',{coins:plan.coins})}>{plan.limit} invites/day · {plan.coins.toLocaleString()} coins/week</button>)}
     </>}
