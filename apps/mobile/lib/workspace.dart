@@ -1,15 +1,21 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'mwitu_links.dart';
+
+const _googleConfigured = bool.fromEnvironment('MWITU_GOOGLE_ANDROID_ENABLED');
+Future<void>? _googleInitialization;
 
 class MwituWorkspace extends StatefulWidget {
   const MwituWorkspace({super.key, required this.destination});
@@ -19,10 +25,15 @@ class MwituWorkspace extends StatefulWidget {
 }
 
 class _MwituWorkspaceState extends State<MwituWorkspace> {
+  final _googleCapability = base64UrlEncode(
+    List<int>.generate(32, (_) => Random.secure().nextInt(256)),
+  );
   InAppWebViewController? _web;
   bool _failed = false;
   bool _leaving = false;
   double _progress = 0;
+  bool _googleBusy = false;
+  bool get _googleEnabled => Platform.isAndroid && _googleConfigured;
 
   @override
   void initState() {
@@ -201,6 +212,51 @@ class _MwituWorkspaceState extends State<MwituWorkspace> {
     );
   }
 
+  void _addAndroidGoogle(InAppWebViewController controller) {
+    if (!_googleEnabled) return;
+    controller.addJavaScriptHandler(
+      handlerName: 'mwituGoogleAndroid',
+      callback: (args) async {
+        final current = Uri.tryParse(
+          (await controller.getUrl())?.toString() ?? '',
+        );
+        if (!mounted ||
+            _googleBusy ||
+            args.length != 1 ||
+            args.first != _googleCapability ||
+            current == null ||
+            current.host != mwituHost ||
+            !isMwituWeb(current)) {
+          return <String, Object>{};
+        }
+        _googleBusy = true;
+        try {
+          final google = GoogleSignIn.instance;
+          await (_googleInitialization ??= google.initialize());
+          final user = await google.authenticate();
+          final token = user.authentication.idToken;
+          final active = Uri.tryParse(
+            (await controller.getUrl())?.toString() ?? '',
+          );
+          if (!mounted ||
+              token == null ||
+              active == null ||
+              active.host != mwituHost ||
+              !isMwituWeb(active)) {
+            return <String, Object>{};
+          }
+          return {'idToken': token};
+        } on GoogleSignInException catch (error) {
+          return {
+            'cancelled': error.code == GoogleSignInExceptionCode.canceled,
+          };
+        } finally {
+          _googleBusy = false;
+        }
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: false,
@@ -253,6 +309,16 @@ class _MwituWorkspaceState extends State<MwituWorkspace> {
                       thirdPartyCookiesEnabled: false,
                     ),
                     initialUserScripts: UnmodifiableListView([
+                      if (_googleEnabled)
+                        UserScript(
+                          source: _nativeGoogleBridge.replaceFirst(
+                            '__CAPABILITY__',
+                            jsonEncode(_googleCapability),
+                          ),
+                          injectionTime:
+                              UserScriptInjectionTime.AT_DOCUMENT_START,
+                          forMainFrameOnly: true,
+                        ),
                       UserScript(
                         source: mwituBridge,
                         injectionTime:
@@ -263,6 +329,7 @@ class _MwituWorkspaceState extends State<MwituWorkspace> {
                     onWebViewCreated: (controller) {
                       _web = controller;
                       _addSharing(controller);
+                      _addAndroidGoogle(controller);
                     },
                     onPermissionRequest: (_, request) => _permission(request),
                     shouldOverrideUrlLoading: (_, action) =>
@@ -345,5 +412,14 @@ const mwituBridge = r"""
       }
     });
   } catch (_) {}
+})();
+""";
+const _nativeGoogleBridge = r"""
+(() => {
+  if (location.origin !== 'https://tiktokmwitu.co.ke' || window.top !== window) return;
+  const proof = __CAPABILITY__;
+  Object.defineProperty(window, 'mwituAndroidGoogle', {
+    value: () => window.flutter_inappwebview.callHandler('mwituGoogleAndroid', proof)
+  });
 })();
 """;

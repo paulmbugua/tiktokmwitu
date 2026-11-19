@@ -19,9 +19,14 @@ import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, typ
 type Tab = 'For You' | 'Following' | 'Discover';
 type WalletPanel = { kind: 'wallet'; purchaseId?: string; liveCode?: string; liveRoom?:string };
 type AccountDestination = 'upload' | 'inbox' | 'account';
+type GoogleSignup = { display_name: string };
+type GoogleSignIn = { web: boolean; android: boolean };
+type GoogleBridge = () => Promise<{ idToken?: string; cancelled?: boolean }>;
+type GoogleWindow = Window & { mwituAndroidGoogle?: GoogleBridge };
 type Panel =
   | { kind: 'upload' | 'inbox' | 'account' | 'saved' | 'invites' }
   | { kind: 'auth'; liveCode?: string; wallet?: WalletPanel; destination?: AccountDestination }
+  | { kind: 'googleSignup'; signup: GoogleSignup; next?: Panel }
   | WalletPanel
   | { kind: 'live'; code?: string; resume?: boolean; roomId?:string }
   | { kind: 'promote'; videoId?:string }
@@ -147,6 +152,7 @@ export default function Home() {
   const [feedback, setFeedback] = useState('');
   const [dialogError, setDialogError] = useState('');
   const [pending, setPending] = useState(false);
+  const [google, setGoogle] = useState<'web' | 'android' | null>(null);
   const [fileName, setFileName] = useState('');
   const [mutation, setMutation] = useState(false);
   const paneKind = useRef<string | undefined>(undefined);
@@ -160,6 +166,7 @@ export default function Home() {
     const videoId = id && /^[a-f0-9-]{36}$/i.test(id) ? id : undefined;
     if (videoId) setShared(videoId);
     const destination = params.get('browse');
+    const googleStatus = params.get('google');
     if (destination === 'videos') setTab('Discover');
     const liveCode = params.get('live');
     const topup = params.get('topup');
@@ -168,19 +175,40 @@ export default function Home() {
       setPanel({ kind: 'wallet', purchaseId: topup, liveCode: liveCode && /^(?:\d{6}|[a-f0-9]{16})$/i.test(liveCode) ? liveCode : undefined,
         liveRoom:/^[a-f0-9-]{36}$/i.test(liveRoom)?liveRoom:undefined });
     } else if (liveCode || destination === 'live') {
-      setPanel({ kind: 'live', code: liveCode?.slice(0, 32) });
+      setPanel({ kind: 'live', code: liveCode?.slice(0, 32),
+        resume: googleStatus === 'signed-in' || googleStatus === 'choose-handle' });
+    } else if (destination === 'wallet') {
+      setPanel({ kind: 'wallet' });
     }
     if (!topup && !liveCode && videoId && params.get('action') === 'comments') {
       api<Video>('/videos/' + videoId).then(video => {
         setPanel(current => current ?? { kind: 'comments', video });
       }).catch(() => undefined);
     }
-    api<{ user: Person | null }>('/auth/me').then(result => {
+    api<{ user: Person | null; google?: GoogleSignIn; googleSignup?: GoogleSignup }>('/auth/me').then(result => {
       setUser(result.user);
+      const app = /MwituFlutter\//.test(navigator.userAgent);
+      if (app && (window as GoogleWindow).mwituAndroidGoogle && result.google?.android) setGoogle('android');
+      if (!app && result.google?.web) setGoogle('web');
+      if (googleStatus) {
+        const clean = new URL(window.location.href);
+        clean.searchParams.delete('google');
+        window.history.replaceState(null, '', clean);
+      }
+      const target = destination === 'post' ? 'upload' : destination;
+      const account = target === 'upload' || target === 'inbox' || target === 'account' ? target : undefined;
+      const signup = result.googleSignup;
+      if (signup && (googleStatus === 'choose-handle' || (!googleStatus && !result.user))) {
+        setPanel(current => ({ kind: 'googleSignup', signup,
+          next: current ?? (account ? { kind: account } : undefined) }));
+        return;
+      }
+      if (googleStatus === 'error' || googleStatus === 'choose-handle') {
+        setFeedback('Google sign-in could not finish. Please try again.');
+      }
       if (!topup && !liveCode && !videoId) {
-        const target = destination === 'post' ? 'upload' : destination;
-        if (target === 'upload' || target === 'inbox' || target === 'account') {
-          setPanel(current => current ?? (result.user ? { kind: target } : { kind: 'auth', destination: target }));
+        if (account) {
+          setPanel(current => current ?? (result.user ? { kind: account } : { kind: 'auth', destination: account }));
         }
       }
     }).catch(() => undefined).finally(() => setSessionReady(true));
@@ -294,6 +322,41 @@ export default function Home() {
     finally { setMutation(false); }
   }
 
+  async function signInWithGoogle(auth: Extract<Panel, { kind: 'auth' }>) {
+    if (!google || pending) return;
+    setPending(true);
+    setDialogError('');
+    const next: Panel | undefined = auth.wallet ?? (auth.liveCode ? { kind: 'live', code: auth.liveCode, resume: true }
+      : auth.destination ? { kind: auth.destination } : undefined);
+    try {
+      if (google === 'web') {
+        const params = new URLSearchParams(window.location.search);
+        if (auth.liveCode) params.set('live', auth.liveCode);
+        if (auth.wallet && !auth.wallet.purchaseId) params.set('browse', 'wallet');
+        if (auth.destination) params.set('browse', auth.destination === 'upload' ? 'post' : auth.destination);
+        const { url } = await send<{ url: string }>('/auth/google/start', 'POST', { next: params.toString() });
+        window.location.assign(url);
+        return;
+      }
+      const result = await (window as GoogleWindow).mwituAndroidGoogle?.();
+      if (result?.cancelled) return;
+      if (!result?.idToken) throw new Error('Google sign-in could not finish. Please try again.');
+      const signedIn = await send<{ user?: Person; googleSignup?: GoogleSignup }>('/auth/google/android', 'POST', { idToken: result.idToken });
+      if (signedIn.googleSignup) {
+        setPanel({ kind: 'googleSignup', signup: signedIn.googleSignup, next });
+      } else if (signedIn.user) {
+        setUser(signedIn.user);
+        setExtra(null);
+        setPanel(next ?? null);
+        refresh();
+      }
+    } catch (error) {
+      setDialogError((error as Error).message);
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!panel || pending) return;
@@ -309,6 +372,14 @@ export default function Home() {
           setExtra(null);
           setPanel(panel.wallet ?? (panel.liveCode ? { kind: 'live', code: panel.liveCode, resume: true }
             : panel.destination ? { kind: panel.destination } : null));
+          refresh();
+          break;
+        }
+        case 'googleSignup': {
+          const person = await send<Person>('/auth/google/complete', 'POST', Object.fromEntries(data));
+          setUser(person);
+          setExtra(null);
+          setPanel(panel.next ?? null);
           refresh();
           break;
         }
@@ -377,6 +448,7 @@ export default function Home() {
 
   const titles = {
     auth: mode === 'register' ? 'Join Tiktok mwitu' : 'Welcome back',
+    googleSignup: 'Choose your handle',
     upload: 'Post a video', comments: 'Comments', profile: 'Creator profile',
     inbox: 'Inbox', chat: panel && 'handle' in panel ? '@' + panel.handle : 'Chat',
     report: 'Report video', account: 'Your account', live: 'Live broadcasts', saved: 'Saved videos', wallet: 'Coin wallet', invites:'LIVE invite plans',promote:'Promote',
@@ -517,6 +589,8 @@ export default function Home() {
         signIn={liveCode => open({ kind: 'auth', liveCode })} />}
       {panel.kind === 'auth' && <form onSubmit={submit}>
         {panel.liveCode && <p className="hint">After signing in, you’ll return to the LIVE.</p>}
+        {google && <button type="button" className="secondary" disabled={pending}
+          onClick={() => void signInWithGoogle(panel)}>Continue with Google</button>}
         {mode === 'register' ? <SignupNameFields /> : <label>Handle<input name="handle" autoComplete="username"
           pattern="[A-Za-z0-9_]{3,24}" maxLength={24} required /></label>}
         <label>Password<input name="password" type="password" minLength={10} maxLength={128} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required /></label>
@@ -524,6 +598,10 @@ export default function Home() {
         <button type="button" className="link" disabled={pending} onClick={() => { setDialogError(''); setMode(mode === 'register' ? 'login' : 'register'); }}>
           {mode === 'register' ? 'Already have an account? Log in' : 'Create an account'}
         </button>
+      </form>}
+      {panel.kind === 'googleSignup' && <form onSubmit={submit}>
+        <SignupNameFields initialDisplayName={panel.signup.display_name} />
+        <button className="primary" disabled={pending}>Finish creating account</button>
       </form>}
       {panel.kind === 'upload' && <form onSubmit={submit}>
         <label className="drop">

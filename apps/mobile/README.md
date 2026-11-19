@@ -23,3 +23,9 @@ The APK is at `build/app/outputs/flutter-apk/app-release.apk`. Website distribut
 Use macOS with Xcode and run `flutter build ios --simulator` for the simulator or `flutter build ios --release --no-codesign` for an unsigned device compile. GitHub Actions runs those checks on macOS. For installation through TestFlight or the App Store, configure the `ke.co.tiktokmwitu.mwitu` bundle in the Apple Developer account with a distribution certificate and provisioning profile, then run `flutter build ipa`. The iOS target uses iOS 15 or later. The private `mwitu://open/` scheme is registered on both platforms. HTTPS Universal Links on iOS require the Apple team association and app entitlement.
 
 Review Apple’s current digital-goods payment and user-generated-content rules before an App Store submission. This source uses the existing web checkout and is configured for development builds. [Apple App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/)
+
+## Google sign-in on Android
+
+Register Android package `ke.co.tiktokmwitu.mwitu` in Firebase under the project that owns Google sign-in. Add both signing fingerprints for the APK you distribute, enable Google in Firebase Authentication, then download a fresh `google-services.json` into `apps/mobile/android/app/`. The file is ignored by Git.
+
+Set the VPS API’s `GOOGLE_ANDROID_CLIENT_ID` to the **Web OAuth client ID** supplied by the matching Android Firebase entry as `client_type: 3`. Flutter uses that client ID as the Google token audience. Build a new signed APK with `flutter build apk --release --dart-define=MWITU_GOOGLE_ANDROID_ENABLED=true`. Build without this flag when compiling without the Firebase configuration.

@@ -12,6 +12,7 @@ import { isIP } from 'node:net';
 import { join } from 'node:path';
 import type { Request, Response, NextFunction } from 'express';
 import { AuthController } from './auth';
+import { googleSchema } from './google-auth';
 import { allowedOrigins, connectRealtime, cookie, db, digest, identity, mediaDir, origin } from './infra';
 import { AdminController } from './admin';
 import { schema } from './schema';
@@ -58,7 +59,7 @@ async function start() {
   if (!process.env.DATABASE_URL && !process.env.PGHOST) throw new Error('Set DATABASE_URL or PGHOST before starting the API.');
   const publicMedia = join(mediaDir, 'public');
   await mkdir(publicMedia, { recursive: true });
-  await db.query(schema + liveSchema + giftSchema + inviteSchema + promotionSchema);
+  await db.query(schema + googleSchema + liveSchema + giftSchema + inviteSchema + promotionSchema);
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
   app.use(helmet());
@@ -152,6 +153,7 @@ async function start() {
 
   const expiry = setInterval(() => {
     void db.query('DELETE FROM sessions WHERE expires_at <= now()').catch(error => console.error('Session cleanup failed', error));
+    void db.query('DELETE FROM google_signup WHERE expires_at <= now()').catch(error => console.error('Google signup cleanup failed', error));
   }, 3600000);
   expiry.unref();
   const liveSweep = setInterval(() => void reconcileLive(), 4000);

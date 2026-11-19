@@ -48,6 +48,10 @@ ADMIN_ORIGIN=https://admin.tiktokmwitu.co.ke
 3. In Cloudflare Zero Trust, open `Rivera Production` and publish `api.tiktokmwitu.co.ke` to `http://tiktokmwitu-api:4000`. Keep the other published hostnames intact.
 4. Check `https://api.tiktokmwitu.co.ke/api/health`. Sign in and publish a clip from the Cloudflare site, then verify playback and an inbox update from a second account.
 
+### Google sign-in on web
+
+For a Google OAuth **Web application** client, authorize `https://tiktokmwitu.co.ke` and `https://www.tiktokmwitu.co.ke` as JavaScript origins. Set the exact redirect URI to `https://api.tiktokmwitu.co.ke/api/auth/google/callback`. In the VPS `.env`, set `GOOGLE_WEB_CLIENT_ID`, `GOOGLE_WEB_CLIENT_SECRET`, and `GOOGLE_WEB_REDIRECT_URI`, then recreate the API service. Keep the OAuth secret in the API environment. The server verifies Google’s identity, and the first sign-in asks the user to choose a handle. See [Android Google sign-in](apps/mobile/README.md#google-sign-in-on-android) for the mobile configuration.
+
 ### Provision moderators
 
 Create the moderator’s account through the public site. Confirm they control that account, then obtain the immutable user ID from PostgreSQL:

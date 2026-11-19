@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react';
 import { api } from './client';
 
-export default function SignupNameFields() {
-  const [displayName, setDisplayName] = useState('');
+export default function SignupNameFields({ initialDisplayName = '' }: { initialDisplayName?: string }) {
+  const [displayName, setDisplayName] = useState(initialDisplayName);
   const [ownHandle, setOwnHandle] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState<{ name: string; handle: string | null }>();
   const name = displayName.trim();
