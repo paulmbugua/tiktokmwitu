@@ -16,7 +16,7 @@ async function authorized(request, url, secret, operation) {
   return crypto.subtle.verify('HMAC', key, bytes, encode.encode(operation + ':' + url.pathname + ':' + expires));
 }
 
-function readRange(value, size) {
+export function readRange(value, size) {
   const match = /^bytes=(\d*)-(\d*)$/.exec(value);
   if (!match || !size || (!match[1] && !match[2])) return null;
   if (!match[1]) {

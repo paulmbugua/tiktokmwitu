@@ -1,5 +1,5 @@
 import { renderDiscovery } from './discovery.mjs';
-import { handleMedia } from './media.mjs';
+import { handleMedia, readRange } from './media.mjs';
 
 const publicHost = 'tiktokmwitu.co.ke';
 const adminHost = 'admin.tiktokmwitu.co.ke';
@@ -12,6 +12,35 @@ function noIndex(response) {
   const headers = new Headers(response.headers);
   headers.set('X-Robots-Tag', 'noindex, nofollow');
   return new Response(response.body, { status: response.status, headers });
+}
+
+async function androidDownload(request, bucket) {
+  const key = 'releases/' + androidFile;
+  const head = request.method === 'HEAD';
+  const requestedRange = head ? null : request.headers.get('Range');
+  const object = head || requestedRange ? await bucket.head(key) : await bucket.get(key);
+  if (!object) return new Response('This release is temporarily unavailable.', {
+    status: 404, headers: { 'Cache-Control': 'no-store' },
+  });
+  const headers = new Headers({
+    'Content-Type': 'application/vnd.android.package-archive',
+    'Content-Length': String(object.size),
+    'Content-Disposition': 'attachment; filename="' + androidFile + '"',
+    'Cache-Control': 'public, max-age=86400, immutable',
+    'Accept-Ranges': 'bytes',
+    'ETag': object.httpEtag,
+    'X-Content-Type-Options': 'nosniff',
+  });
+  if (!requestedRange) return new Response(head ? null : object.body, { headers });
+  const range = readRange(requestedRange, object.size);
+  if (!range) return new Response(null, {
+    status: 416, headers: { 'Content-Range': 'bytes */' + object.size, 'Cache-Control': 'no-store' },
+  });
+  const partial = await bucket.get(key, { range, onlyIf: { etagMatches: object.etag } });
+  if (!partial?.body) return new Response(null, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  headers.set('Content-Length', String(range.length));
+  headers.set('Content-Range', `bytes ${range.offset}-${range.offset + range.length - 1}/${object.size}`);
+  return new Response(partial.body, { status: 206, headers });
 }
 
 async function publicMedia(request, url, env) {
@@ -47,17 +76,7 @@ export default {
         return Response.redirect(new URL('/download/' + androidFile, url), 302);
       }
       if (url.pathname === '/download/' + androidFile) {
-        const key = 'releases/' + androidFile;
-        const object = request.method === 'HEAD' ? await env.MEDIA_BUCKET.head(key) : await env.MEDIA_BUCKET.get(key);
-        if (!object) return new Response('This release is temporarily unavailable.', { status: 404, headers: { 'Cache-Control': 'no-store' } });
-        return new Response(request.method === 'HEAD' ? null : object.body, { headers: {
-          'Content-Type': 'application/vnd.android.package-archive',
-          'Content-Length': String(object.size),
-          'Content-Disposition': 'attachment; filename="' + androidFile + '"',
-          'Cache-Control': 'public, max-age=86400, immutable',
-          'ETag': object.httpEtag,
-          'X-Content-Type-Options': 'nosniff',
-        } });
+        return androidDownload(request, env.MEDIA_BUCKET);
       }
       if (url.pathname === '/download') {
         return env.ASSETS.fetch(new Request(new URL('/download.html', url), request));
