@@ -266,6 +266,7 @@ class _MwituWorkspaceState extends State<MwituWorkspace> {
     child: Scaffold(
       body: SafeArea(
         child: Stack(
+          fit: StackFit.expand,
           children: [
             InAppWebView(
               initialUrlRequest: _request(
@@ -311,8 +312,9 @@ class _MwituWorkspaceState extends State<MwituWorkspace> {
                     final uri = Uri.tryParse(
                       (await controller.getUrl())?.toString() ?? '',
                     );
-                    if (mounted && uri != null && isMwituWeb(uri))
+                    if (mounted && uri != null && isMwituWeb(uri)) {
                       await _leave();
+                    }
                   },
                 );
               },
