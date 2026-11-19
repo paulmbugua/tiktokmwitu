@@ -1,9 +1,17 @@
 {
   "latest": {
-    "version": "1.0.3",
-    "versionCode": 4,
+    "version": "1.0.4",
+    "versionCode": 5,
     "minSdk": 24,
-    "notes": ["New Mwitu logo and hand-lettered header."]
+    "notes": [
+      "See what changed and how large the download is before updating.",
+      "Download when you are ready or choose a reminder the next day."
+    ]
   },
-  "previous": ["1.0.2", "1.0.1", "1.0.0"]
+  "previous": [
+    "1.0.3",
+    "1.0.2",
+    "1.0.1",
+    "1.0.0"
+  ]
 }
