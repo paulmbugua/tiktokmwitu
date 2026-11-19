@@ -22,7 +22,7 @@ type AccountDestination = 'upload' | 'inbox' | 'account';
 type GoogleSignup = { display_name: string };
 type GoogleSignIn = { web: boolean; android: boolean };
 type GoogleBridge = () => Promise<{ idToken?: string; cancelled?: boolean }>;
-type GoogleWindow = Window & { mwituAndroidGoogle?: GoogleBridge };
+type GoogleWindow = Window & { mwituAndroidGoogle?: GoogleBridge; mwituOpenFeed?: () => boolean };
 type Panel =
   | { kind: 'upload' | 'inbox' | 'account' | 'saved' | 'invites' }
   | { kind: 'auth'; liveCode?: string; wallet?: WalletPanel; destination?: AccountDestination }
@@ -171,6 +171,7 @@ export default function Home() {
     const destination = params.get('browse');
     const googleStatus = params.get('google');
     if (destination === 'videos') setTab('Discover');
+    if (destination === 'following') setTab('Following');
     const liveCode = params.get('live');
     const topup = params.get('topup');
     const liveRoom=params.get('room')??'';
@@ -287,6 +288,7 @@ export default function Home() {
   }
 
   function choose(next: Tab) {
+    if (next === 'For You' && (window as GoogleWindow).mwituOpenFeed?.()) return;
     clearLink();
     setExtra(null);
     setTab(next);

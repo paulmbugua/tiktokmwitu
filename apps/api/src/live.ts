@@ -90,6 +90,7 @@ export async function finishRoom(id: string, outcome: string, moderator?: Person
     await settle(client, room);
     await endMatch(client, room, outcome, moderator ? undefined : room.host_id);
     await client.query('DELETE FROM live_stage_seats WHERE room_id=$1', [id]);
+    await client.query('DELETE FROM live_stage_requests WHERE room_id=$1', [id]);
     await client.query('UPDATE live_rooms SET ended_at=now(),spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1', [id]);
     if (moderator) {
       await client.query('DELETE FROM live_reports WHERE room_id=$1', [id]);

@@ -1,6 +1,6 @@
 'use client';
 
-import { Camera, CameraOff, Expand, Flag, Gift, Heart, LayoutGrid, LogOut, Maximize, MessageCircle, Mic, MicOff, Minimize, Send, Share2, Shield, Sparkles, Swords, UsersRound, X } from 'lucide-react';
+import { Camera, CameraOff, Expand, Flag, Gift, Heart, LayoutGrid, LogOut, Maximize, MessageCircle, Mic, MicOff, Minimize, Plus, Send, Share2, Shield, Sparkles, Swords, UsersRound, X } from 'lucide-react';
 import { LocalVideoTrack, Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { send, useData, type Person } from './client';
@@ -91,6 +91,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const battlePublisher=split&&!!user&&(four?!!ownBattle&&ownBattle.status!=='invited':match?.guest_id===user.id);
   const readyMatch = match?.status==='ready'&&battlePublisher&&(!four||ownBattle?.status==='accepted')?match.id:null;
   const seats = state?.stage?.seats ?? [];
+  const requests = state?.stage?.requests ?? [];
+  const requestedSeat = !!user && requests.some(person => person.id === user.id);
   const mySeat = seats.find(seat => seat.user_id === user?.id);
   const stageSeatId = mySeat?.on_stage ? mySeat.id : null;
   stageSeatRef.current = stageSeatId;
@@ -98,7 +100,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const mediaEligible=useRef(false);
   mediaEligible.current=battlePublisher;
   const stageGuests = seats.filter(seat => seat.on_stage);
-  const spotlight = stageGuests.length > 0 && !split ? state?.stage?.spotlight ?? null : null;
+  const spotlight = !split ? state?.stage?.spotlight ?? null : null;
   const fullscreen = !!spotlight && state?.stage?.fullscreen === true;
   const docked = !fullscreen && (split || stageGuests.length > 0);
   const canModerate = state?.self.role === 'host' || state?.self.role === 'moderator';
@@ -289,13 +291,16 @@ export default function Broadcast({ grant, user, signIn, leave }: {
     const foot=footer.current;
     if(!root||!foot)return;
     const hud=root.querySelector('.arena-match');
+    const tools=root.querySelector('.arena-tools');
     const update=()=>{
       root.style.setProperty('--stage-controls-height',Math.ceil(foot.getBoundingClientRect().height+10)+'px');
       root.style.setProperty('--stage-hud-height',Math.ceil(hud?.getBoundingClientRect().height??0)+'px');
+      root.style.setProperty('--stage-toolbar-height',Math.ceil((tools?.getBoundingClientRect().height??0)+14)+'px');
     };
     const observer=new ResizeObserver(update);
     observer.observe(foot);
     if(hud)observer.observe(hud);
+    if(tools)observer.observe(tools);
     update();
     return ()=>observer.disconnect();
   },[]);
@@ -359,7 +364,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       await send(path + '/stage', 'POST', command);
       const room = connection.current;
       if (command.action === 'leave' && room) await releaseGuestMedia(room).catch(() => undefined);
-    }, command.action === 'invite' ? 'Stage invitation sent.' : '');
+    }, command.action === 'invite' || command.action === 'approve-request' ? 'Stage invitation sent.'
+      : command.action === 'request' ? 'Request sent to the host.' : '');
   }
 
   function submit(event: FormEvent<HTMLFormElement>, endpoint: string, payload: object, notice?: string) {
@@ -404,19 +410,43 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       : stageGuests.map(seat => ({ id: seat.user_id, name: seat.display_name }))),
   ];
   const cards=(state?.stage?.capacity??7)+1;
+  const openSeats=state?.stage?.openSeats ?? Math.max(0,cards-1-seats.length);
   const grid=!split&&!spotlight&&stageGuests.length>0;
   const layout = split ? (four?' battle-stage battle-four':' split battle-stage') : spotlight ? ' spotlight-stage' + (fullscreen ? ' spotlight-fullscreen' : '') : grid ? ' grid-stage' : '';
   const fitAllowed=!split&&!grid&&(!spotlight||fullscreen);
+  const canInteractWithSeat = connected && !!state && !state.room.ended && !battle && (grant.host || !mySeat);
+  function seatCard(index: number) {
+    const isAvailable = index < openSeats;
+    if (canInteractWithSeat && (isAvailable || (index === 0 && requestedSeat))) {
+      return <button type="button" className="arena-tile vacant stage-request-card" key={'seat-'+index} disabled={pending} onClick={() => {
+        if (grant.host) toggleDrawer('stage');
+        else if (!user) signIn();
+        else void stageAction({ action: requestedSeat ? 'cancel-request' : 'request' });
+      }}>
+        <Plus size={20} aria-hidden="true" />{grant.host ? 'Invite' : requestedSeat ? 'Cancel request' : 'Request'}
+      </button>;
+    }
+    return <div className="arena-tile vacant" key={'seat-'+index} aria-label={isAvailable ? 'Open guest seat' : 'Reserved guest seat'}>
+      <UsersRound size={20} aria-hidden="true" />
+    </div>;
+  }
+  const tileFor = (tile: (typeof tiles)[number]) => <StageTile key={tile.id} identity={tile.id}
+    name={tile.name} track={videos[tile.id]?.track} host={tile.id===grant.hostId} featured={tile.id===spotlight} />;
+  const emptyCards = Array.from({length: Math.max(0, cards-tiles.length)}, (_,index)=>seatCard(index));
+  const requestFirst = canInteractWithSeat && (openSeats > 0 || requestedSeat);
 
-  return <div className={'arena'+(docked?' arena-docked':'')} ref={arena}>
-    <div className={'arena-media' + layout + (fit&&fitAllowed ? ' fit' : '')} aria-label="LIVE video stage" data-tile-count={tiles.length} data-layout-cards={grid?cards:undefined}
-      style={{ '--rail-rows': Math.max(1, Math.ceil((tiles.length - 1) / 2)), '--grid-rows':cards/2 } as CSSProperties}>
-      {tiles.map(tile => <StageTile key={tile.id} identity={tile.id} name={tile.name} track={videos[tile.id]?.track}
-        host={tile.id===grant.hostId} featured={tile.id === spotlight} />)}
-      {grid&&Array.from({length:Math.max(0,cards-tiles.length)},(_,index)=><div className="arena-tile vacant" key={'seat-'+index} aria-label="Open guest seat">
-        <UsersRound size={21} aria-hidden="true"/>
-      </div>)}
+  return <div className={'arena'+(docked?' arena-docked':'')+(fullscreen?' arena-maximized':'')} ref={arena}>
+    <div className={'arena-media' + layout + (fit&&fitAllowed ? ' fit' : '')} aria-label="LIVE video stage" data-tile-count={spotlight && !fullscreen ? cards : tiles.length} data-layout-cards={grid?cards:undefined}
+      style={{ '--rail-rows': Math.max(1, Math.ceil((cards - 1) / 2)), '--grid-rows':cards/2 } as CSSProperties}>
+      {(fullscreen ? tiles.filter(tile=>tile.id===spotlight) : tiles).map(tileFor)}
+      {(grid || (spotlight && !fullscreen)) && emptyCards}
     </div>
+    {fullscreen && <aside className="arena-guest-rail" aria-label="Guest seats on LIVE">
+      {requestFirst && emptyCards[0]}
+      {tiles.filter(tile => tile.id !== spotlight).map(tileFor)}
+      {emptyCards.slice(requestFirst ? 1 : 0)}
+    </aside>}
+    {!spotlight && !grid && !split && requestFirst && <div className="arena-solo-seat">{emptyCards[0]}</div>}
     {connected && grant.host && spotlight && <button className="arena-action arena-pill arena-focus-toggle" disabled={pending}
       onClick={() => void stageAction({ action: 'fullscreen', userId: spotlight, enabled: !fullscreen })}>
       {fullscreen ? <LayoutGrid size={16} /> : <Expand size={16} />}
@@ -434,7 +464,9 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         {fitAllowed&&<button className="arena-action" aria-label={fit ? 'Fill screen' : 'Fit entire video'} title={fit ? 'Fill screen' : 'Fit entire video'} aria-pressed={fit} onClick={() => setFit(value => !value)}>{fit ? <Maximize size={18} /> : <Minimize size={18} />}</button>}
         {connected && grant.host && <button className="arena-action" aria-label="Share LIVE" title="Share LIVE" onClick={() => toggleDrawer('share')} aria-expanded={drawer === 'share'}><Share2 size={18} /></button>}
         {connected && grant.host && <button className="arena-action" aria-label="Guest stage" title="Guest stage"
-          onClick={() => toggleDrawer('stage')} aria-expanded={drawer === 'stage'}><UsersRound size={18} /></button>}
+          onClick={() => toggleDrawer('stage')} aria-expanded={drawer === 'stage'}><UsersRound size={18} />
+          {requests.length > 0 && <span className="stage-request-count" aria-hidden="true">{requests.length}</span>}
+        </button>}
         {canModerate && <button className="arena-action" aria-label="Moderation" title="Moderation" onClick={() => toggleDrawer('moderation')} aria-expanded={drawer === 'moderation'}><Shield size={18} /></button>}
         <button className="arena-action" aria-label={grant.host ? 'End broadcast' : 'Leave'} title={grant.host ? 'End broadcast' : 'Leave'} disabled={pending} onClick={exit}><X size={21} /></button>
       </div>
@@ -500,6 +532,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         </div>}
       </div>}
       <div className="arena-buttons arena-tools">
+        {requestedSeat && openSeats === 0 && <button className="arena-action arena-pill" disabled={pending}
+          onClick={() => void stageAction({action:'cancel-request'})}>Cancel stage request</button>}
         <button className="arena-action" aria-label={hideChat ? 'Show chat' : 'Hide chat'} title={hideChat ? 'Show chat' : 'Hide chat'} aria-pressed={!hideChat}
           onClick={() => setHideChat(value => !value)}><MessageCircle size={19} /></button>
         {enableAudio && <button className="arena-action arena-pill" onClick={() => void connection.current?.startAudio().catch(() => setError('Could not enable audio.'))}>Enable sound</button>}
@@ -548,7 +582,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       {drawer === 'moderation' && canModerate && state && user && <LiveModeration path={path} user={user} hostId={grant.hostId} chatOpen={state.room.chat_open}
         guestAccess={state.room.guest_access} messages={state.messages} pinnedId={state.room.pinned_id} revision={revision} ended={state.room.ended} onChange={sync} />}
       {drawer === 'stage' && grant.host && connected && <>
-        <StageControls path={path} hostId={grant.hostId} seats={seats} capacity={state?.stage?.capacity ?? 7}
+        <StageControls path={path} hostId={grant.hostId} seats={seats} requests={requests} capacity={state?.stage?.capacity ?? 7}
           spotlight={spotlight} revision={revision} pending={pending} battle={battle} onCommand={stageAction} />
         {liveNotice && <p role="status">{liveNotice}</p>}
         {(error || snapshot?.error) && <p className="error" role="alert">{error || snapshot?.error}</p>}

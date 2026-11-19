@@ -122,12 +122,21 @@ class _VideoFeedState extends State<VideoFeed> with WidgetsBindingObserver {
                   child: Image.asset('assets/mwitu.png', width: 35, height: 35),
                 ),
                 const SizedBox(width: 10),
-                Text(
-                  'TikTok Mwitu',
-                  style: Theme.of(context).textTheme.titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800),
+                Flexible(
+                  child: Text(
+                    'TikTok Mwitu',
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    style: Theme.of(context).textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
                 ),
                 const Spacer(),
+                IconButton(
+                  tooltip: 'Following',
+                  onPressed: () => widget.open(workspaceUri(tab: 'following')),
+                  icon: const Icon(Icons.people_outline_rounded),
+                ),
                 IconButton(
                   tooltip: 'Discover',
                   onPressed: () => widget.open(workspaceUri(tab: 'videos')),

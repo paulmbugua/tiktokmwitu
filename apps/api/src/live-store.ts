@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS live_stage_seats (
   missing_since timestamptz,
   UNIQUE(room_id,user_id)
 );
+CREATE TABLE IF NOT EXISTS live_stage_requests (
+  room_id uuid NOT NULL REFERENCES live_rooms ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
+  requested_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY(room_id,user_id)
+);
 CREATE TABLE IF NOT EXISTS live_matches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   room_id uuid NOT NULL REFERENCES live_rooms ON DELETE CASCADE,
@@ -112,7 +118,7 @@ export type LiveRoom = {
 
 export async function stageSnapshot(client: PoolClient, room: LiveRoom, userId: string | null) {
   const capacity=room.stage_cards-1;
-  if (room.ended_at) return { spotlight: null, fullscreen: false, capacity, seats: [] };
+  if (room.ended_at) return { spotlight: null, fullscreen: false, capacity, seats: [], requests: [], openSeats: 0 };
   const { rows: seats } = await client.query(`
     SELECT s.id,s.user_id,u.display_name,u.handle,s.accepted_at IS NOT NULL AS on_stage
     FROM live_stage_seats s JOIN users u ON u.id=s.user_id
@@ -121,10 +127,20 @@ export async function stageSnapshot(client: PoolClient, room: LiveRoom, userId: 
     ORDER BY s.invited_at,s.id`, [room.id, userId, room.host_id]);
   const spotlight = seats.some(seat => seat.on_stage && seat.user_id === room.spotlight_id) || room.spotlight_id === room.host_id
     ? room.spotlight_id : null;
-  return { spotlight, fullscreen: !!spotlight && room.spotlight_fullscreen, capacity, seats };
+  const {rows:[{reserved}]} = await client.query<{reserved:number}>(`
+    SELECT count(*)::int AS reserved FROM live_stage_seats WHERE room_id=$1
+    AND (accepted_at IS NOT NULL OR expires_at>clock_timestamp())`, [room.id]);
+  const requests = userId ? (await client.query<Person>(`
+    SELECT u.id,u.handle,u.display_name FROM live_stage_requests r JOIN users u ON u.id=r.user_id
+    JOIN live_members m ON m.room_id=r.room_id AND m.user_id=r.user_id AND NOT m.banned
+    WHERE r.room_id=$1 AND ($2::uuid=$3::uuid OR r.user_id=$2)
+    AND r.requested_at>clock_timestamp()-interval '5 minutes'
+    ORDER BY r.requested_at,u.id LIMIT 100`, [room.id,userId,room.host_id])).rows : [];
+  return { spotlight, fullscreen: !!spotlight && room.spotlight_fullscreen, capacity, seats, requests, openSeats: Math.max(0,capacity-reserved) };
 }
 
 export async function dropStageSeat(client: PoolClient, roomId: string, userId: string) {
+  await client.query('DELETE FROM live_stage_requests WHERE room_id=$1 AND user_id=$2', [roomId, userId]);
   await client.query('DELETE FROM live_stage_seats WHERE room_id=$1 AND user_id=$2', [roomId, userId]);
   await client.query('UPDATE live_rooms SET spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1 AND spotlight_id=$2', [roomId, userId]);
 }

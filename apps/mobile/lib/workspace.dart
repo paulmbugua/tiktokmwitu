@@ -265,129 +265,121 @@ class _MwituWorkspaceState extends State<MwituWorkspace> {
     },
     child: Scaffold(
       body: SafeArea(
-        child: Column(
+        child: Stack(
           children: [
-            Row(
-              children: [
-                TextButton.icon(
-                  onPressed: _leave,
-                  icon: const Icon(Icons.arrow_back_rounded, size: 19),
-                  label: const Text('For You'),
-                ),
-                const Spacer(),
-                if (_progress > 0 && _progress < 1)
-                  const Padding(
-                    padding: EdgeInsets.only(right: 16),
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-              ],
-            ),
-            Expanded(
-              child: Stack(
-                children: [
-                  InAppWebView(
-                    initialUrlRequest: _request(
-                      widget.destination.value ?? workspaceUri(),
-                    ),
-                    initialSettings: InAppWebViewSettings(
-                      applicationNameForUserAgent: mwituUserAgent,
-                      allowsInlineMediaPlayback: true,
-                      mediaPlaybackRequiresUserGesture: false,
-                      useShouldOverrideUrlLoading: true,
-                      useOnDownloadStart: true,
-                      allowsBackForwardNavigationGestures: false,
-                      allowFileAccess: false,
-                      allowFileAccessFromFileURLs: false,
-                      allowUniversalAccessFromFileURLs: false,
-                      javaScriptCanOpenWindowsAutomatically: false,
-                      mixedContentMode:
-                          MixedContentMode.MIXED_CONTENT_NEVER_ALLOW,
-                      thirdPartyCookiesEnabled: false,
-                    ),
-                    initialUserScripts: UnmodifiableListView([
-                      if (_googleEnabled)
-                        UserScript(
-                          source: _nativeGoogleBridge.replaceFirst(
-                            '__CAPABILITY__',
-                            jsonEncode(_googleCapability),
-                          ),
-                          injectionTime:
-                              UserScriptInjectionTime.AT_DOCUMENT_START,
-                          forMainFrameOnly: true,
-                        ),
-                      UserScript(
-                        source: mwituBridge,
-                        injectionTime:
-                            UserScriptInjectionTime.AT_DOCUMENT_START,
-                        forMainFrameOnly: true,
-                      ),
-                    ]),
-                    onWebViewCreated: (controller) {
-                      _web = controller;
-                      _addSharing(controller);
-                      _addAndroidGoogle(controller);
-                    },
-                    onPermissionRequest: (_, request) => _permission(request),
-                    shouldOverrideUrlLoading: (_, action) =>
-                        _navigation(action),
-                    onDownloadStartRequest: (_, request) {
-                      final target = Uri.tryParse(request.url.toString());
-                      if (target != null && _mediaDownload(target)) {
-                        unawaited(_external(target));
-                      }
-                    },
-                    onProgressChanged: (_, value) {
-                      if (mounted) setState(() => _progress = value / 100);
-                    },
-                    onLoadStart: (_, _) {
-                      if (mounted) setState(() => _failed = false);
-                    },
-                    onReceivedError: (_, request, error) {
-                      if (mounted &&
-                          request.isForMainFrame == true &&
-                          !error.description.contains('ERR_ABORTED')) {
-                        setState(() => _failed = true);
-                      }
-                    },
-                    onReceivedHttpError: (_, request, response) {
-                      if (mounted &&
-                          request.isForMainFrame == true &&
-                          (response.statusCode ?? 0) >= 500) {
-                        setState(() => _failed = true);
-                      }
-                    },
-                  ),
-                  if (_failed)
-                    Positioned.fill(
-                      child: ColoredBox(
-                        color: Theme.of(context).scaffoldBackgroundColor,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.wifi_off_rounded, size: 48),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Couldn’t connect to Mwitu',
-                                style: Theme.of(context).textTheme.titleLarge,
-                              ),
-                              const SizedBox(height: 16),
-                              FilledButton(
-                                onPressed: _navigate,
-                                child: const Text('Try again'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
+            InAppWebView(
+              initialUrlRequest: _request(
+                widget.destination.value ?? workspaceUri(),
               ),
+              initialSettings: InAppWebViewSettings(
+                applicationNameForUserAgent: mwituUserAgent,
+                allowsInlineMediaPlayback: true,
+                mediaPlaybackRequiresUserGesture: false,
+                useShouldOverrideUrlLoading: true,
+                useOnDownloadStart: true,
+                allowsBackForwardNavigationGestures: false,
+                allowFileAccess: false,
+                allowFileAccessFromFileURLs: false,
+                allowUniversalAccessFromFileURLs: false,
+                javaScriptCanOpenWindowsAutomatically: false,
+                mixedContentMode: MixedContentMode.MIXED_CONTENT_NEVER_ALLOW,
+                thirdPartyCookiesEnabled: false,
+              ),
+              initialUserScripts: UnmodifiableListView([
+                if (_googleEnabled)
+                  UserScript(
+                    source: _nativeGoogleBridge.replaceFirst(
+                      '__CAPABILITY__',
+                      jsonEncode(_googleCapability),
+                    ),
+                    injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                    forMainFrameOnly: true,
+                  ),
+                UserScript(
+                  source: mwituBridge,
+                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                  forMainFrameOnly: true,
+                ),
+              ]),
+              onWebViewCreated: (controller) {
+                _web = controller;
+                _addSharing(controller);
+                _addAndroidGoogle(controller);
+                controller.addJavaScriptHandler(
+                  handlerName: 'mwituOpenFeed',
+                  callback: (_) async {
+                    final uri = Uri.tryParse(
+                      (await controller.getUrl())?.toString() ?? '',
+                    );
+                    if (mounted && uri != null && isMwituWeb(uri))
+                      await _leave();
+                  },
+                );
+              },
+              onPermissionRequest: (_, request) => _permission(request),
+              shouldOverrideUrlLoading: (_, action) => _navigation(action),
+              onDownloadStartRequest: (_, request) {
+                final target = Uri.tryParse(request.url.toString());
+                if (target != null && _mediaDownload(target)) {
+                  unawaited(_external(target));
+                }
+              },
+              onProgressChanged: (_, value) {
+                if (mounted) setState(() => _progress = value / 100);
+              },
+              onLoadStart: (_, _) {
+                if (mounted) setState(() => _failed = false);
+              },
+              onReceivedError: (_, request, error) {
+                if (mounted &&
+                    request.isForMainFrame == true &&
+                    !error.description.contains('ERR_ABORTED')) {
+                  setState(() => _failed = true);
+                }
+              },
+              onReceivedHttpError: (_, request, response) {
+                if (mounted &&
+                    request.isForMainFrame == true &&
+                    (response.statusCode ?? 0) >= 500) {
+                  setState(() => _failed = true);
+                }
+              },
             ),
+            if (_progress > 0 && _progress < 1)
+              const Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: LinearProgressIndicator(minHeight: 2),
+              ),
+            if (_failed)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.wifi_off_rounded, size: 48),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Couldn’t connect to Mwitu',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: _navigate,
+                          child: const Text('Try again'),
+                        ),
+                        TextButton(
+                          onPressed: _leave,
+                          child: const Text('For You'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -398,6 +390,12 @@ class _MwituWorkspaceState extends State<MwituWorkspace> {
 const mwituBridge = r"""
 (() => {
   if (location.origin !== 'https://tiktokmwitu.co.ke') return;
+  window.mwituOpenFeed = () => {
+    const bridge = window.flutter_inappwebview;
+    if (!bridge?.callHandler) return false;
+    bridge.callHandler('mwituOpenFeed');
+    return true;
+  };
   const share = navigator.share?.bind(navigator);
   try {
     Object.defineProperty(navigator, 'share', {

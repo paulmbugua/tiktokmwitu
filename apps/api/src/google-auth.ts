@@ -47,7 +47,7 @@ export function browserDestination(value: unknown) {
     if (params.get('action') === 'comments') next.set('action', 'comments');
   }
   const browse = params.get('browse') ?? '';
-  if (['live', 'post', 'inbox', 'account', 'videos', 'wallet'].includes(browse)) next.set('browse', browse);
+  if (['live', 'post', 'inbox', 'account', 'videos', 'following', 'wallet'].includes(browse)) next.set('browse', browse);
   return next.toString();
 }
 

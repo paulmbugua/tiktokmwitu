@@ -8,6 +8,8 @@ import { currentMatch, dropStageSeat, lockedRoom, member, requireOpen, settle } 
 
 const commandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('invite'), handle: handleSchema }),
+  z.object({ action: z.enum(['request', 'cancel-request']) }),
+  z.object({ action: z.enum(['approve-request', 'decline-request']), userId: z.uuid() }),
   z.object({ action: z.enum(['accept', 'decline', 'restore', 'leave', 'remove']), seatId: z.uuid() }),
   z.object({ action: z.literal('spotlight'), userId: z.uuid().nullable() }),
   z.object({ action: z.literal('fullscreen'), userId: z.uuid(), enabled: z.boolean() }),
@@ -44,17 +46,41 @@ export class LiveStageController {
       requireOpen(room);
       await member(client, room, actor);
       const host = room.host_id === actor.id;
-      if (['invite', 'remove', 'spotlight', 'fullscreen','layout'].includes(command.action) && !host) {
+      if (['invite', 'approve-request', 'decline-request', 'remove', 'spotlight', 'fullscreen','layout'].includes(command.action) && !host) {
         throw new ForbiddenException('Only the host can manage the stage.');
       }
       let targetId: string | null;
-      if (command.action === 'invite') {
+      if (command.action === 'request' || command.action === 'cancel-request' || command.action === 'decline-request') {
+        targetId = command.action === 'decline-request' ? command.userId : actor.id;
+        if (command.action === 'request') {
+          if (host) throw new ForbiddenException('You already host this LIVE.');
+          if (!room.online_at) throw new ConflictException('Wait for the broadcast to start.');
+          await settle(client, room);
+          if (await currentMatch(client, room)) throw new ConflictException('You can request a seat after the challenge.');
+          await connectedUser(id, actor.id);
+          await client.query("DELETE FROM live_stage_requests WHERE room_id=$1 AND requested_at<=clock_timestamp()-interval '5 minutes'", [id]);
+          const {rows: reserved} = await client.query<{user_id:string}>(`
+            SELECT user_id FROM live_stage_seats WHERE room_id=$1
+            AND (accepted_at IS NOT NULL OR expires_at>clock_timestamp())`, [id]);
+          if (reserved.some(seat => seat.user_id === actor.id)) throw new ConflictException('You already have a guest seat or invitation.');
+          if (reserved.length >= room.stage_cards-1) throw new ConflictException('All guest seats are reserved.');
+          if (!(await client.query('INSERT INTO live_stage_requests(room_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, actor.id])).rowCount) return;
+        } else if (!(await client.query('DELETE FROM live_stage_requests WHERE room_id=$1 AND user_id=$2', [id, targetId])).rowCount) return;
+      } else if (command.action === 'invite' || command.action === 'approve-request') {
         await settle(client, room);
         if (await currentMatch(client, room)) throw new ConflictException('Finish the challenge before inviting stage guests.');
         await client.query('DELETE FROM live_stage_seats WHERE room_id=$1 AND accepted_at IS NULL AND expires_at<=clock_timestamp()', [id]);
-        const { rows: [guest] } = await client.query<Person>('SELECT id,handle,display_name FROM users WHERE handle=$1', [command.handle]);
+        const { rows: [guest] } = command.action === 'invite'
+          ? await client.query<Person>('SELECT id,handle,display_name FROM users WHERE handle=$1', [command.handle])
+          : await client.query<Person>(`SELECT u.id,u.handle,u.display_name FROM live_stage_requests r JOIN users u ON u.id=r.user_id
+            WHERE r.room_id=$1 AND r.user_id=$2 AND r.requested_at>clock_timestamp()-interval '5 minutes'`, [id, command.userId]);
+        if (command.action === 'approve-request') {
+          if (!guest) throw new ConflictException('This stage request is no longer available.');
+          await connectedUser(id, guest.id);
+        }
         if (!guest || guest.id === actor.id) throw new NotFoundException('Choose another Tiktok mwitu account.');
         await member(client, room, guest);
+        await client.query('DELETE FROM live_stage_requests WHERE room_id=$1 AND user_id=$2', [id, guest.id]);
         const seats = await client.query<{ user_id: string }>('SELECT user_id FROM live_stage_seats WHERE room_id=$1', [id]);
         if (seats.rows.some(seat => seat.user_id === guest.id)) return;
         if (seats.rows.length >= room.stage_cards-1) throw new ConflictException('All guest seats in this layout are reserved.');
@@ -79,7 +105,7 @@ export class LiveStageController {
         targetId = command.userId;
         if (room.spotlight_id !== targetId) throw new ConflictException('The spotlight changed. Select it again.');
         await client.query('UPDATE live_rooms SET spotlight_fullscreen=$2 WHERE id=$1', [id, command.enabled]);
-      } else {
+      } else if ('seatId' in command) {
         const { rows: [seat] } = await client.query<{ user_id: string; accepted_at: Date | null; expires_at: Date }>(
           'SELECT user_id,accepted_at,expires_at FROM live_stage_seats WHERE room_id=$1 AND id=$2', [id, command.seatId]);
         if (!seat) {
@@ -106,7 +132,7 @@ export class LiveStageController {
               .catch(() => undefined); // The room sweep retries revocation if the participant moved or LiveKit timed out.
           }
         }
-      }
+      } else return;
       await client.query('INSERT INTO live_audit(room_id,actor_id,target_id,action,details) VALUES ($1,$2,$3,$4,$5)',
         [id, actor.id, targetId, 'stage:' + command.action, JSON.stringify(command)]);
     });

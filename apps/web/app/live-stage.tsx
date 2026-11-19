@@ -6,9 +6,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useData, type Person } from './client';
 
 export type StageSeat = { id: string; user_id: string; display_name: string; handle: string; on_stage: boolean };
-export type StageState = { spotlight: string | null; fullscreen: boolean; capacity: number; seats: StageSeat[] };
+export type StageState = { spotlight: string | null; fullscreen: boolean; capacity: number; seats: StageSeat[];
+  requests?: Person[]; openSeats?: number };
 export type StageCommand =
   | { action: 'invite'; handle: string }
+  | { action: 'request' | 'cancel-request' }
+  | { action: 'approve-request' | 'decline-request'; userId: string }
   | { action: 'accept' | 'decline' | 'leave' | 'remove'; seatId: string }
   | { action: 'spotlight'; userId: string | null }
   | { action: 'layout'; cards: 2|4|6|8 }
@@ -44,8 +47,9 @@ export function StageTile({ name, track, identity, featured, host }: {
   </div>;
 }
 
-export function StageControls({ path, hostId, seats, capacity, spotlight, revision, pending, battle, onCommand }: {
+export function StageControls({ path, hostId, seats, requests, capacity, spotlight, revision, pending, battle, onCommand }: {
   path: string; hostId: string; seats: StageSeat[]; capacity: number; spotlight: string | null; revision: number; pending: boolean; battle: boolean;
+  requests: Person[];
   onCommand: (command: StageCommand) => Promise<boolean>;
 }) {
   const audience = useData<Person[]>(battle ? null : path + '/stage/audience', revision);
@@ -60,14 +64,25 @@ export function StageControls({ path, hostId, seats, capacity, spotlight, revisi
     </div>
     <div className="stage-controls-heading">
       <strong>Guest seats · {seats.length}/{capacity}</strong>
-      {seats.some(seat => seat.on_stage) && <div className="arena-buttons">
+      <div className="arena-buttons">
         {spotlight && <button className="secondary" disabled={pending} onClick={() => void onCommand({ action: 'spotlight', userId: null })}>
           <LayoutGrid size={15} /> Grid
         </button>}
         {spotlight !== hostId && <button className="secondary" disabled={pending}
           onClick={() => void onCommand({ action: 'spotlight', userId: hostId })}>Spotlight host</button>}
-      </div>}
+      </div>
     </div>
+    {requests.length > 0 && <ul className="stage-people" aria-label="Stage requests">
+      {requests.map(person => <li key={person.id}>
+        <div><strong>{person.display_name}</strong><small>@{person.handle} · Requested a seat</small></div>
+        <div className="arena-buttons">
+          <button className="secondary" disabled={pending || full} aria-label={'Approve ' + person.display_name}
+            onClick={() => void onCommand({action:'approve-request',userId:person.id})}>Approve</button>
+          <button className="secondary" disabled={pending} aria-label={'Decline ' + person.display_name}
+            onClick={() => void onCommand({action:'decline-request',userId:person.id})}>Decline</button>
+        </div>
+      </li>)}
+    </ul>}
     {seats.length > 0 && <ul className="stage-people" aria-label="Guest seats">
       {seats.map(seat => <li key={seat.id}>
         <div><strong>{seat.display_name}</strong><small>@{seat.handle} · {seat.on_stage ? 'On stage' : 'Invited'}</small></div>
