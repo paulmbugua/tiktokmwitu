@@ -297,22 +297,6 @@ dialog:has(.arena) { background: #100c17; }
   background: #d3fc77;
   color: #17200e;
 }
-@media (max-width: 760px) {
-  dialog:is([data-panel='upload'],[data-panel='inbox'],[data-panel='chat'],[data-panel='live'],[data-panel='auth'],[data-panel='googleSignup']) {
-    inset: 0;
-    margin: 0;
-    border: 0;
-    border-radius: 0;
-    width: 100%;
-    max-width: none;
-    height: 100dvh;
-    max-height: none;
-    overscroll-behavior: contain;
-  }
-  dialog:is([data-panel='upload'],[data-panel='inbox'],[data-panel='chat'],[data-panel='live'],[data-panel='auth'],[data-panel='googleSignup']):not(:has(.arena)) > .dialog-inner {
-    padding-block: max(16px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-bottom));
-  }
-}
 .arena-action { background: #21182be8; border-color: #f5ddff35; }
 .arena-action:is(:hover,[aria-expanded=true],[aria-pressed=true]) { background: #3c2c4f; color: var(--lavender); border-color: #d7afff80; }
 .arena-top .arena-buttons { justify-content: flex-end; flex-wrap: nowrap; }
@@ -513,3 +497,20 @@ dialog:has(.arena) { background: #100c17; }
 }
 .catalog-link { color: var(--lavender, #dbc7ff); font-size: .875rem; }
 .catalog-link:hover { color: #d3fc77; }
+
+@media (max-width: 760px) {
+  dialog:is([data-panel='upload'],[data-panel='inbox'],[data-panel='chat'],[data-panel='live'],[data-panel='auth'],[data-panel='googleSignup']):not(:has(.arena)) {
+    inset: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    animation: none;
+  }
+  dialog:is([data-panel='upload'],[data-panel='inbox'],[data-panel='chat'],[data-panel='live'],[data-panel='auth'],[data-panel='googleSignup']):not(:has(.arena)) > .dialog-inner {
+    padding-block: max(16px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-bottom));
+  }
+}
