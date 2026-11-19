@@ -4,7 +4,8 @@ import { handleMedia, readRange } from './media.mjs';
 const publicHost = 'tiktokmwitu.co.ke';
 const adminHost = 'admin.tiktokmwitu.co.ke';
 const apiHost = 'https://api.tiktokmwitu.co.ke';
-const androidFile = 'tiktok-mwitu-1.0.0.apk';
+const androidFile = 'tiktok-mwitu-1.0.1.apk';
+const androidReleases = new Set([androidFile, 'tiktok-mwitu-1.0.0.apk']);
 const liveInvitePath = /^\/join\/(\d{6}|[0-9A-F]{16})\/?$/i;
 const mediaPath = /^\/media\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\.(mp4|jpg)$/;
 
@@ -14,8 +15,8 @@ function noIndex(response) {
   return new Response(response.body, { status: response.status, headers });
 }
 
-async function androidDownload(request, bucket) {
-  const key = 'releases/' + androidFile;
+async function androidDownload(request, bucket, file) {
+  const key = 'releases/' + file;
   const head = request.method === 'HEAD';
   const requestedRange = head ? null : request.headers.get('Range');
   const object = head || requestedRange ? await bucket.head(key) : await bucket.get(key);
@@ -25,7 +26,7 @@ async function androidDownload(request, bucket) {
   const headers = new Headers({
     'Content-Type': 'application/vnd.android.package-archive',
     'Content-Length': String(object.size),
-    'Content-Disposition': 'attachment; filename="' + androidFile + '"',
+    'Content-Disposition': 'attachment; filename="' + file + '"',
     'Cache-Control': 'public, max-age=86400, immutable',
     'Accept-Ranges': 'bytes',
     'ETag': object.httpEtag,
@@ -75,8 +76,9 @@ export default {
       if (url.pathname === '/download/android') {
         return Response.redirect(new URL('/download/' + androidFile, url), 302);
       }
-      if (url.pathname === '/download/' + androidFile) {
-        return androidDownload(request, env.MEDIA_BUCKET);
+      const file = url.pathname.slice('/download/'.length);
+      if (url.pathname.startsWith('/download/') && androidReleases.has(file)) {
+        return androidDownload(request, env.MEDIA_BUCKET, file);
       }
       if (url.pathname === '/download') {
         return env.ASSETS.fetch(new Request(new URL('/download.html', url), request));
