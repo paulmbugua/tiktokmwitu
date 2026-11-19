@@ -11,7 +11,8 @@ val signingProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 val releaseStore = signingProperties.getProperty("storeFile")
-if (releaseStore == null && gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }) {
+val unsignedCi = providers.environmentVariable("MWITU_UNSIGNED_CI").orNull == "true"
+if (releaseStore == null && !unsignedCi && gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }) {
     throw GradleException("Configure android/key.properties before building a release.")
 }
 
