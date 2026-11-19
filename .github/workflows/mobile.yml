@@ -29,7 +29,7 @@ jobs:
           flutter-version: '3.47.2'
           cache: true
       - uses: android-actions/setup-android@v3
-      - run: sdkmanager 'platforms;android-36' 'ndk;29.0.13113456'
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;29.0.13113456'
       - run: flutter pub get
       - run: flutter build apk --release
         env:
@@ -39,6 +39,28 @@ jobs:
           name: mwitu-android-unsigned
           path: apps/mobile/build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
+      - name: Enable emulator acceleration
+        working-directory: .
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Smoke test launch and LIVE link
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_5
+          working-directory: apps/mobile
+          script: |
+            keytool -genkeypair -keystore "$RUNNER_TEMP/mwitu-emulator.jks" -storepass android -keypass android -alias ci -keyalg RSA -validity 1 -dname CN=MwituCI
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$RUNNER_TEMP/mwitu-emulator.jks" --ks-pass pass:android --out "$RUNNER_TEMP/mwitu-emulator.apk" build/app/outputs/flutter-apk/app-release.apk
+            adb install "$RUNNER_TEMP/mwitu-emulator.apk"
+            adb shell am start -W -n ke.co.tiktokmwitu.mwitu/.MainActivity
+            adb shell am start -W -a android.intent.action.VIEW -d 'mwitu://open/join/000000' -p ke.co.tiktokmwitu.mwitu
+            sleep 8
+            adb shell pidof ke.co.tiktokmwitu.mwitu
   iphone:
     runs-on: macos-26
     defaults:
