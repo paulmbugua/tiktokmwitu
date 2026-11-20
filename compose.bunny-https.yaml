@@ -1,0 +1,11 @@
+services:
+  bunny-origin:
+    networks:
+      bunny_media:
+      vps_ingress:
+        aliases: [mwitu-bunny-origin]
+
+networks:
+  vps_ingress:
+    external: true
+    name: ${MWITU_VPS_INGRESS_NETWORK:-rivera_default}

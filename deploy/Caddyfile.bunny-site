@@ -1,0 +1,3 @@
+live-origin.tiktokmwitu.co.ke {
+	reverse_proxy mwitu-bunny-origin:8080
+}

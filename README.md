@@ -86,7 +86,7 @@ docker compose --env-file secrets/bunny-origin.env -f compose.bunny-origin.yaml 
 
 Use an unused room UUID for test publishers. The RTMP address from the private media network is `rtmp://bunny-media:1935/mwitu-ROOM-UUID?user=mwitu&pass=PASSWORD`. The local playlist is `http://127.0.0.1:18888/mwitu-ROOM-UUID/index.m3u8` and requires the `X-Mwitu-Origin-Key` header.
 
-For delivery, expose this gateway through a dedicated HTTPS origin hostname and use it as the Bunny Volume Pull Zone origin. Send the private origin header from Bunny, bypass caching for playlists, and cache successful segment responses. Keep the origin credentials separate from Bunny player token signing. Connecting LiveKit Egress and switching audience playback are separate rollout steps.
+For delivery, add the DNS-only `live-origin.tiktokmwitu.co.ke` record pointing at the VPS. Include `compose.bunny-https.yaml` in the origin deployment to join the VPS ingress network, and install the site from `deploy/Caddyfile.bunny-site` on the shared HTTPS ingress. Use this HTTPS hostname as the Bunny Volume Pull Zone origin. Send the private origin header from Bunny, bypass caching for playlists, and cache successful segment responses. Keep the origin credentials separate from Bunny player token signing. Connecting LiveKit Egress and switching audience playback are separate rollout steps.
 
 ### Deliver large LIVE audiences through Cloudflare Stream
 
