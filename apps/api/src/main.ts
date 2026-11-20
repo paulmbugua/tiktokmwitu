@@ -17,6 +17,7 @@ import { allowedOrigins, connectRealtime, cookie, db, digest, identity, mediaDir
 import { AdminController } from './admin';
 import { schema } from './schema';
 import { SocialController } from './social';
+import { ProfileImagesController, readProfileImage } from './profile-images';
 import { LiveController, pushGuestBroadcasts, reconcileLive } from './live';
 import { LiveStageController } from './live-stage';
 import { LiveModerationController } from './live-moderation';
@@ -52,7 +53,7 @@ class HealthController {
     },
   })],
   controllers: [AuthController, HealthController, SocialController, VideosController, LiveController, LiveStageController, LiveModerationController,
-    AdminController, GiftPaymentsController, LiveGiftsController, LiveInvitesController, PromoteController],
+    AdminController, GiftPaymentsController, LiveGiftsController, LiveInvitesController, PromoteController, ProfileImagesController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 class AppModule {}
@@ -96,6 +97,12 @@ async function start() {
     try {
       const [ , id, extension] = match;
       const video = await db.query<{ media_storage: MediaStorage }>('SELECT media_storage FROM videos WHERE id=$1', [id]);
+      if (!video.rowCount && extension === 'jpg') {
+        const { rows: [photo] } = await db.query<{ id: string; storage: MediaStorage }>('SELECT id,storage FROM profile_images WHERE id=$1', [id]);
+        if (!photo) { res.sendStatus(404); return; }
+        res.type('jpg').send(await readProfileImage(photo));
+        return;
+      }
       if (!video.rowCount) { res.sendStatus(404); return; }
       if (extension === 'jpg') {
         try {

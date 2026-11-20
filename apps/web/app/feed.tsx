@@ -17,7 +17,7 @@ import Promote, { promotionAction, promotionEvent, usePlacementView, type Placem
 import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Video } from './client';
 import CreatorProfile from './creator-profile';
 import { uploadVideo, type UploadJob } from './profile-upload';
-import CaptionMentions, { CaptionText } from './caption-mentions';
+import VideoDescription, { DescriptionText, topicFromSearch } from './video-description';
 
 type Tab = 'For You' | 'Following' | 'Discover';
 type WalletPanel = { kind: 'wallet'; purchaseId?: string; liveCode?: string; liveRoom?:string };
@@ -82,10 +82,10 @@ function SavedVideos({ show }: { show: (id: string) => void }) {
   </>;
 }
 
-function Clip({ video, root, muted, onMute, children, profile, mention, manage, promotion, goalAction }: {
+function Clip({ video, root, muted, onMute, children, profile, hashtag, manage, promotion, goalAction }: {
   video: Video; root: HTMLElement | null; muted: boolean; onMute: () => void; children: ReactNode; profile: () => void; manage: ReactNode;
   promotion?:Placement; goalAction:()=>void;
-  mention: (handle: string) => void;
+  hashtag: (tag: string) => void;
 }) {
   const section = useRef<HTMLElement>(null);
   const player = useRef<HTMLVideoElement>(null);
@@ -134,7 +134,7 @@ function Clip({ video, root, muted, onMute, children, profile, mention, manage, 
           <button onClick={profile}><Avatar name={video.display_name} /><span>{video.display_name} <small>@{video.handle}</small></span></button>
           {manage}
         </div>
-        {video.caption && <p><CaptionText caption={video.caption} open={mention} /></p>}
+        {video.caption && <p><DescriptionText description={video.caption} open={hashtag} /></p>}
         {promotion&&<div ref={setAdRef} className="commerce-heading promoted-cta">
           <small>Sponsored</small>
           {promotion.destination ? <a className="secondary" href={promotion.destination} target="_blank" rel="noopener noreferrer sponsored"
@@ -262,7 +262,11 @@ export default function Home() {
 
   const filters = new URLSearchParams();
   if (tab === 'Following') filters.set('following', 'true');
-  if (tab === 'Discover' && query) filters.set('q', query);
+  if (tab === 'Discover' && query) {
+    const topic = topicFromSearch(query);
+    if (topic) filters.set('topic', topic);
+    else filters.set('q', query);
+  }
   const feedPath = '/videos?' + filters.toString();
   const feed = useData<Feed>(feedPath, feedRev);
   const placementResult=useData<Placement|null>(sessionReady&&tab==='For You'&&!shared?'/promote/placement?surface=feed':null);
@@ -349,6 +353,12 @@ export default function Home() {
     setPanel(null);
   }
 
+  function chooseHashtag(tag: string) {
+    choose('Discover');
+    setSearch(tag);
+    setQuery(tag);
+  }
+
   async function more() {
     const cursor = (extra ?? feed?.data)?.next;
     if (!cursor || mutation) return;
@@ -418,7 +428,7 @@ export default function Home() {
       const file = data.get('video');
       const caption = String(data.get('caption') ?? '').trim();
       if (!(file instanceof File) || !file.size || !caption) {
-        setDialogError('Choose a video and enter a caption.');
+        setDialogError('Choose a video and enter a description.');
         return;
       }
       queueUpload({ id: crypto.randomUUID(), owner: user.id, caption, file, stage: 'queued', percent: 0 });
@@ -555,7 +565,7 @@ export default function Home() {
         event.preventDefault(); setExtra(null); setQuery(search.trim()); root?.scrollTo(0, 0);
       }}>
         <Search size={20} />
-        <input aria-label="Search videos" placeholder="Search creators or captions" value={search} onChange={event => setSearch(event.target.value)} maxLength={80} />
+        <input aria-label="Search videos" placeholder="Search creators, descriptions or #hashtags" value={search} onChange={event => setSearch(event.target.value)} maxLength={80} />
         <button className="secondary">Search</button>
       </form>}
       <div className="content">
@@ -567,7 +577,7 @@ export default function Home() {
         }}>
           {clips.map(video => <Clip key={video.id} video={video} root={root} muted={muted} onMute={() => setMuted(!muted)}
             profile={() => open({ kind: 'profile', handle: video.handle })}
-            mention={handle => open({ kind: 'profile', handle })}
+            hashtag={chooseHashtag}
             promotion={video.id===paid?.id?placement??undefined:undefined}
             goalAction={()=>open(placement?.goal==='engagement'?{kind:'comments',video}:{kind:'profile',handle:video.handle})}
             manage={<div className="clip-utilities">
@@ -600,7 +610,7 @@ export default function Home() {
             <div className="empty-art" aria-hidden="true"><div className="art-inner"><img src="/icons/mwitu-192.png" alt="" width="64" height="64" /></div></div>
             <div>
               <h1>{feedError ? 'Feed unavailable' : !ready ? 'Kenyan short videos' : tab === 'Following' ? 'Your following feed' : query ? 'No matching videos' : 'What’s happening mtaani?'}</h1>
-              <p>{feedError ?? (!ready ? 'Watch clips from Kenyan creators or explore LIVE streams.' : tab === 'Following' ? 'Follow Kenyan creators to see their latest posts here.' : query ? 'Try a different creator or caption.' : 'Share a short video from your corner of Kenya.')}</p>
+              <p>{feedError ?? (!ready ? 'Watch clips from Kenyan creators or explore LIVE streams.' : tab === 'Following' ? 'Follow Kenyan creators to see their latest posts here.' : query ? 'Try a different creator, description or hashtag.' : 'Share a short video from your corner of Kenya.')}</p>
               {!ready && <p><a className="catalog-link" href="/videos">Browse videos</a> · <a className="catalog-link" href="/live">Explore LIVE</a></p>}
               {feedError ? <button className="secondary" onClick={refresh}>Try again</button> : ready && (tab === 'Following'
                 ? <button className="secondary" onClick={() => choose('For You')}>Browse For You</button>
@@ -675,7 +685,7 @@ export default function Home() {
           {fileName && <span className="upload-file">{fileName}</span>}
           <small>MP4, MOV or WebM · 48 MB · First 60 seconds</small>
         </label>
-        <CaptionMentions />
+        <VideoDescription />
         <button className="primary">Publish video</button>
       </form>}
       {panel.kind === 'comments' && <>

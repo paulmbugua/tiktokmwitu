@@ -14,6 +14,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS bio varchar(160) NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS website varchar(300) NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS profile_images (
+  id uuid PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
+  kind text NOT NULL CHECK (kind IN ('avatar','cover')),
+  storage text NOT NULL CHECK (storage IN ('local','r2')),
+  UNIQUE(user_id,kind)
+);
 CREATE INDEX IF NOT EXISTS session_expiry ON sessions(expires_at);
 CREATE TABLE IF NOT EXISTS videos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -32,6 +39,7 @@ CREATE TABLE IF NOT EXISTS video_media_cleanup (
   id uuid PRIMARY KEY,
   queued_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE video_media_cleanup ADD COLUMN IF NOT EXISTS thumbnail_only boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS videos_creator ON videos(user_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS follows (
   follower_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,

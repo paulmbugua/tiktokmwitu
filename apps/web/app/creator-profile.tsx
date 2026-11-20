@@ -1,6 +1,6 @@
 'use client';
 
-import { Bookmark, Clapperboard, Grid3X3, Heart, Menu, Pencil, Plus, RotateCcw, X } from 'lucide-react';
+import { Bookmark, Camera, Clapperboard, Grid3X3, Heart, ImagePlus, Menu, Pencil, Plus, RotateCcw, X } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, mediaUrl, send, useData, type Feed, type Person, type Video } from './client';
 import type { UploadJob } from './profile-upload';
@@ -12,6 +12,51 @@ const collections = [
 ] as const;
 const count = new Intl.NumberFormat('en-KE', { notation: 'compact' });
 const poster = (id: string) => mediaUrl(id).replace(/\.mp4$/, '.jpg');
+
+function ProfilePhoto({ kind, id, changed }: { kind: 'avatar' | 'cover'; id?: string | null; changed: () => void }) {
+  const label = kind === 'avatar' ? 'Profile photo' : 'Cover photo';
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  async function update(file?: File) {
+    if (busy) return;
+    setError('');
+    setSaved(false);
+    if (file && file.size > 6 * 1024 * 1024) { setError('Choose a photo under 6 MB.'); return; }
+    setBusy(true);
+    const path = '/account/profile/images/' + kind;
+    try {
+      if (file) {
+        const body = new FormData();
+        body.append('image', file);
+        await api(path, { method: 'PUT', body });
+      } else await send(path, 'DELETE');
+      setSaved(true);
+      changed();
+    } catch (error) { setError((error as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="creator-photo-field">
+    <div className="creator-photo-preview" data-kind={kind}>
+      {id ? <img src={poster(id)} crossOrigin="anonymous" alt="" /> : <ImagePlus size={21} aria-hidden="true" />}
+    </div>
+    <label className="creator-photo-picker">
+      {label}
+      <input type="file" aria-label={'Choose ' + label.toLowerCase()} disabled={busy}
+        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={event => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = '';
+          if (file) void update(file);
+        }} />
+    </label>
+    {id && <button type="button" className="link" disabled={busy} onClick={() => void update()}>Remove {label.toLowerCase()}</button>}
+    {busy && <small role="status">Saving {label.toLowerCase()}…</small>}
+    {saved && <small role="status">{label} updated.</small>}
+    {error && <small className="error" role="alert">{error}</small>}
+  </div>;
+}
 
 function VideoTile({ id, caption, likes, show }: {
   id: string; caption: string; likes?: number; show: (id: string) => void;
@@ -73,7 +118,8 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const result = useData<import('./client').Profile>('/creators/' + encodeURIComponent(handle), revision);
+  const [photoRevision, setPhotoRevision] = useState(0);
+  const result = useData<import('./client').Profile>('/creators/' + encodeURIComponent(handle), revision + photoRevision);
   const profile = result?.data;
   const active = mine ? collection : 'Posts';
   const path = active === 'Saved' ? '/videos/saved?' : active === 'Liked' ? '/videos?liked=true&' : '/videos?creator=' + encodeURIComponent(handle) + '&';
@@ -114,9 +160,17 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
   }
 
   return <div className="creator-page">
+    {identity && <div className="creator-cover" data-custom={!!profile?.cover_id}>
+      {profile?.cover_id && <img src={poster(profile.cover_id)} alt="" crossOrigin="anonymous" />}
+      {mine && profile && !editing && <button className="icon" type="button" aria-label="Edit profile photos" onClick={() => { setError(''); setEditing(true); }}>
+        <Camera size={19} />
+      </button>}
+    </div>}
     {identity && <div className="creator-intro">
       <div className="creator-identity">
-        <div className="creator-avatar" aria-hidden="true">{identity.display_name.slice(0, 1).toUpperCase()}</div>
+        <div className="creator-avatar" aria-hidden="true">
+          {profile?.avatar_id ? <img src={poster(profile.avatar_id)} alt="" crossOrigin="anonymous" /> : identity.display_name.slice(0, 1).toUpperCase()}
+        </div>
         <div><h3>{identity.display_name}</h3><p>@{identity.handle}</p></div>
         {mine && <button className="icon" aria-label="Account settings" onClick={account}><Menu size={21} /></button>}
       </div>
@@ -137,6 +191,10 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
         </>}
       </div>
       {editing && <form onSubmit={save}>
+        <div className="creator-photo-fields">
+          <ProfilePhoto kind="avatar" id={profile?.avatar_id} changed={() => setPhotoRevision(value => value + 1)} />
+          <ProfilePhoto kind="cover" id={profile?.cover_id} changed={() => setPhotoRevision(value => value + 1)} />
+        </div>
         <label>Display name<input name="display_name" defaultValue={identity.display_name} maxLength={48} required /></label>
         <label>Bio<textarea name="bio" defaultValue={profile?.bio} maxLength={160} /></label>
         <label>Website<input name="website" type="url" defaultValue={profile?.website} maxLength={300} placeholder="https://" /></label>

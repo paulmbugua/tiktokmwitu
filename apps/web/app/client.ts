@@ -4,7 +4,10 @@
 import { useEffect, useState } from 'react';
 
 export type Person = { id: string; handle: string; display_name: string };
-export type Profile = Person & { followers: number; following_count: number; following: boolean; likes: number; bio: string; website: string };
+export type Profile = Person & {
+  followers: number; following_count: number; following: boolean; likes: number; bio: string; website: string;
+  avatar_id: string | null; cover_id: string | null;
+};
 export type Video = {
   id: string; caption: string; handle: string; creator_id: string;
   display_name: string; likes: number; comments: number; liked: boolean; following: boolean; saved: boolean;

@@ -68,9 +68,12 @@ export async function sweepCloudMedia() {
   if (!useR2 || cleaning) return;
   cleaning = true;
   try {
-    const { rows } = await db.query<{ id: string }>('SELECT id FROM video_media_cleanup ORDER BY queued_at LIMIT 20');
-    for (const { id } of rows) {
-      await cleanCloudVideo(id).catch(() => undefined);
+    const { rows } = await db.query<{ id: string; thumbnail_only: boolean }>(
+      'SELECT id,thumbnail_only FROM video_media_cleanup ORDER BY queued_at LIMIT 20');
+    for (const { id, thumbnail_only } of rows) {
+      if (thumbnail_only) {
+        await removeCloudThumbnail(id).then(() => db.query('DELETE FROM video_media_cleanup WHERE id=$1', [id])).catch(() => undefined);
+      } else await cleanCloudVideo(id).catch(() => undefined);
     }
   } finally {
     cleaning = false;

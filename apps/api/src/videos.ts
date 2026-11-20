@@ -63,6 +63,7 @@ export class VideosController {
       q: searchSchema.optional(),
       creator: handleSchema.optional(),
       liked: z.literal('true').optional(),
+      topic: z.string().regex(/^[\p{L}\p{N}_]{1,48}$/u).optional(),
       at: clientCursor.shape.at.optional(),
       after: clientCursor.shape.id.optional(),
     }), query);
@@ -75,8 +76,9 @@ export class VideosController {
       AND ($4::text IS NULL OR u.handle=$4)
       AND ($5::timestamptz IS NULL OR (v.created_at,v.id)<($5,$6::uuid))
       AND (NOT $7::boolean OR EXISTS (SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=$1))
+      AND ($8::text IS NULL OR v.caption ~* ('(^|[^[:alnum:]_#])#' || $8 || '([^[:alnum:]_]|$)'))
       ORDER BY v.created_at DESC,v.id DESC LIMIT 13`,
-      [user?.id ?? null, input.following === 'true', input.q || null, input.creator ?? null, input.at ?? null, input.after ?? null, input.liked === 'true']);
+      [user?.id ?? null, input.following === 'true', input.q || null, input.creator ?? null, input.at ?? null, input.after ?? null, input.liked === 'true', input.topic ?? null]);
     return feedPage(rows);
   }
 
