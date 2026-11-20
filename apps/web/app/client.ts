@@ -14,7 +14,7 @@ export type Feed = { items: Video[]; next: Cursor | null };
 export type Comment = { id: string; handle: string; body: string };
 export type Inbox = { handle: string; display_name: string; body: string };
 export type Message = { id: string; body: string; mine: boolean };
-const apiOrigin = process.env.NEXT_PUBLIC_API_ORIGIN ?? '';
+export const apiOrigin = process.env.NEXT_PUBLIC_API_ORIGIN ?? '';
 export const mediaUrl = (id: string) => apiOrigin + '/media/' + id + '.mp4';
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {

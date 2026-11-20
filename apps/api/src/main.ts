@@ -17,7 +17,7 @@ import { allowedOrigins, connectRealtime, cookie, db, digest, identity, mediaDir
 import { AdminController } from './admin';
 import { schema } from './schema';
 import { SocialController } from './social';
-import { LiveController, reconcileLive } from './live';
+import { LiveController, pushGuestBroadcasts, reconcileLive } from './live';
 import { LiveStageController } from './live-stage';
 import { LiveModerationController } from './live-moderation';
 import { playbackUrl, sweepCloudMedia, useR2, type MediaStorage } from './media-storage';
@@ -29,6 +29,7 @@ import { GiftPaymentsController, reconcileTopups } from './gift-payments';
 import { LiveGiftsController } from './live-gifts';
 import { inviteSchema, LiveInvitesController, sweepInviteCodes } from './live-invites';
 import { PromoteController, promotionSchema, settlePromotions } from './promote';
+import { reconcileStreams, streamSchema } from './live-stream';
 
 @Controller()
 class HealthController {
@@ -59,7 +60,7 @@ async function start() {
   if (!process.env.DATABASE_URL && !process.env.PGHOST) throw new Error('Set DATABASE_URL or PGHOST before starting the API.');
   const publicMedia = join(mediaDir, 'public');
   await mkdir(publicMedia, { recursive: true });
-  await db.query(schema + googleSchema + liveSchema + giftSchema + inviteSchema + promotionSchema);
+  await db.query(schema + googleSchema + liveSchema + giftSchema + inviteSchema + promotionSchema + streamSchema);
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
   app.use(helmet());
@@ -158,6 +159,10 @@ async function start() {
   expiry.unref();
   const liveSweep = setInterval(() => void reconcileLive(), 4000);
   liveSweep.unref();
+  const streamSweep = setInterval(() => void reconcileStreams(), 2500);
+  streamSweep.unref();
+  const audiencePush = setInterval(() => void pushGuestBroadcasts(), 1500);
+  audiencePush.unref();
   const paymentSweep = setInterval(() => void reconcileTopups(), 4000);
   paymentSweep.unref();
   const inviteSweep=setInterval(()=>void sweepInviteCodes().catch(error=>console.error('LIVE invite cleanup failed',error)),3600000);

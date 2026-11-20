@@ -3,7 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { handleSchema, parse, requireUser, uuid, type Person } from './infra';
-import { connectedUser, liveService, notifyRoom, publishPermission, roomName } from './live';
+import { connectedUser, joinedAudience, liveService, notifyRoom, publishPermission, roomName } from './live';
 import { currentMatch, dropStageSeat, lockedRoom, member, requireOpen, settle } from './live-store';
 
 const commandSchema = z.discriminatedUnion('action', [
@@ -27,7 +27,8 @@ export class LiveStageController {
       const connected = (await liveService().listParticipants(roomName(room.id))).map(person => person.identity);
       const { rows } = await client.query<Person>(`
         SELECT u.id,u.handle,u.display_name FROM live_members m JOIN users u ON u.id=m.user_id
-        WHERE m.room_id=$1 AND NOT m.banned AND u.id<>$2 AND u.id::text=ANY($3::text[])
+        WHERE m.room_id=$1 AND NOT m.banned AND u.id<>$2 AND (u.id::text=ANY($3::text[]) OR
+          (m.joined_at>now()-interval '2 minutes' AND EXISTS (SELECT 1 FROM live_streams WHERE room_id=$1)))
           AND NOT EXISTS (SELECT 1 FROM live_stage_seats s WHERE s.room_id=$1 AND s.user_id=u.id
             AND (s.accepted_at IS NOT NULL OR s.expires_at>clock_timestamp()))
         ORDER BY lower(u.display_name),u.handle LIMIT 150`, [room.id, host.id, connected]);
@@ -57,7 +58,7 @@ export class LiveStageController {
           if (!room.online_at) throw new ConflictException('Wait for the broadcast to start.');
           await settle(client, room);
           if (await currentMatch(client, room)) throw new ConflictException('You can request a seat after the challenge.');
-          await connectedUser(id, actor.id);
+          if (!await joinedAudience(client, id, actor.id)) await connectedUser(id, actor.id);
           await client.query("DELETE FROM live_stage_requests WHERE room_id=$1 AND requested_at<=clock_timestamp()-interval '5 minutes'", [id]);
           const {rows: reserved} = await client.query<{user_id:string}>(`
             SELECT user_id FROM live_stage_seats WHERE room_id=$1
@@ -76,7 +77,7 @@ export class LiveStageController {
             WHERE r.room_id=$1 AND r.user_id=$2 AND r.requested_at>clock_timestamp()-interval '5 minutes'`, [id, command.userId]);
         if (command.action === 'approve-request') {
           if (!guest) throw new ConflictException('This stage request is no longer available.');
-          await connectedUser(id, guest.id);
+          if (!await joinedAudience(client, id, guest.id)) await connectedUser(id, guest.id);
         }
         if (!guest || guest.id === actor.id) throw new NotFoundException('Choose another Tiktok mwitu account.');
         await member(client, room, guest);

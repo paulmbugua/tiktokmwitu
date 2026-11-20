@@ -116,7 +116,7 @@ export type LiveRoom = {
   spotlight_id: string | null; spotlight_fullscreen: boolean; stage_cards: number;
 };
 
-export async function stageSnapshot(client: PoolClient, room: LiveRoom, userId: string | null) {
+export async function stageSnapshot(client: PoolClient | typeof db, room: LiveRoom, userId: string | null) {
   const capacity=room.stage_cards-1;
   if (room.ended_at) return { spotlight: null, fullscreen: false, capacity, seats: [], requests: [], openSeats: 0 };
   const { rows: seats } = await client.query(`
@@ -152,7 +152,7 @@ export type Match = {
 };
 export type MatchGuest={user_id:string;display_name:string;status:'invited'|'accepted'|'ready';score:number};
 
-export async function matchGuests(client:PoolClient,matchId:string){
+export async function matchGuests(client:PoolClient | typeof db,matchId:string){
   return (await client.query<MatchGuest>(`
     SELECT g.user_id,u.display_name,g.status,g.score FROM live_match_guests g JOIN users u ON u.id=g.user_id
     WHERE g.match_id=$1 ORDER BY g.position`,[matchId])).rows;
@@ -190,7 +190,7 @@ export function requireOpen(room: LiveRoom) {
   if (!room.online_at || room.ended_at) throw new ConflictException('This broadcast is offline.');
 }
 
-export async function member(client: PoolClient, room: LiveRoom, user: Person) {
+export async function member(client: PoolClient | typeof db, room: LiveRoom, user: Person) {
   const { rows: [entry] } = await client.query<Member>(
     'SELECT moderator,muted_until,banned FROM live_members WHERE room_id=$1 AND user_id=$2', [room.id, user.id]);
   if (entry?.banned) throw new ForbiddenException('You are blocked from this LIVE.');

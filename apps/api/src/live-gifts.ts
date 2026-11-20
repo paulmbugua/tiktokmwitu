@@ -3,7 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { parse, requireUser, uuid } from './infra';
-import { liveService, notifyRoom, roomName } from './live';
+import { joinedAudience, liveService, notifyRoom, roomName } from './live';
 import { currentMatch, lockedRoom, matchGuests, member, requireOpen, settle } from './live-store';
 import { coinBalance, giftCatalog } from './gift-store';
 
@@ -46,7 +46,7 @@ export class LiveGiftsController {
       if (!active.includes(input.recipientId)) throw new ConflictException('That person has left the stage.');
       if (wallet.balance < gift.coins) throw new ConflictException('You need more coins for this gift.');
       const participants = await liveService().listParticipants(roomName(id));
-      if (!participants.some(person => person.identity === sender.id)) throw new ForbiddenException('Join this LIVE to send gifts.');
+      if (!participants.some(person => person.identity === sender.id) && !await joinedAudience(client, id, sender.id)) throw new ForbiddenException('Join this LIVE to send gifts.');
       if (!participants.some(person => person.identity === input.recipientId)) throw new ConflictException('That person is reconnecting.');
       const { rows: [updated] } = await client.query<{ balance: number }>(
         'UPDATE gift_wallets SET balance=balance-$2 WHERE user_id=$1 RETURNING balance', [sender.id, gift.coins]);

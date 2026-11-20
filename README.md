@@ -76,6 +76,43 @@ For the self-hosted VPS setup, use `compose.livekit.yaml` with `compose.yaml` an
 
 Sign in as the host, select Live, allow camera and microphone, then sign in from another browser profile to watch and send a chat message.
 
+### Deliver large LIVE audiences through Cloudflare Stream
+
+The same invite URL opens the audience player. LiveKit serves the host and invited performers. Its compositor pushes a portrait rendition of the stage to one Cloudflare Stream live input per broadcast. Stream delivers signed adaptive HLS to the audience. Camera effects already present in published tracks are included. The audience sees the composited grid with a playback delay. Chat, gifting, moderation and seat requests still use Mwitu. Guests can read chat, and signed-in viewers can participate.
+
+Enable Cloudflare Stream on the account and supply an account-scoped **Stream Edit** API token on the VPS. Use the account ID for `CF_STREAM_ACCOUNT_ID` and the token for `CF_STREAM_API_TOKEN`. Set `CF_STREAM_PLAYBACK_HOST` to the account’s `customer-….cloudflarestream.com` hostname. Create a [Stream signing key](https://developers.cloudflare.com/stream/viewing-videos/securing-your-stream/) and set `CF_STREAM_SIGNING_KEY_ID` to its ID and `CF_STREAM_SIGNING_KEY_JWK` to the API’s base64-encoded JWK. Keep the token and private key in the VPS environment.
+
+Set `redis.address: livekit-redis:6379` in the private LiveKit server YAML. Create `secrets/livekit-egress.yaml` on the VPS with the existing LiveKit key and secret, the internal LiveKit WebSocket URL, and the same Redis address:
+
+```yaml
+api_key: REPLACE_WITH_LIVEKIT_API_KEY
+api_secret: REPLACE_WITH_LIVEKIT_API_SECRET
+ws_url: ws://tiktokmwitu-livekit:7880
+redis:
+  address: livekit-redis:6379
+```
+
+Start the Redis and Egress services and recreate LiveKit and the API during a window with no active broadcasts:
+
+```sh
+docker compose -f compose.yaml -f compose.tunnel.yaml -f compose.livekit.yaml -f compose.stream.yaml up -d --build db livekit-redis livekit livekit-egress api
+```
+
+Open a LIVE and wait for **Audience video is ready to watch** in **Share LIVE**. Open its code from a signed-out browser, verify the Cloudflare HLS video and guest chat, then use a signed-in second browser to request a seat, accept it, and step down. Check the end-of-broadcast and guest-watching controls. Stream inputs are disabled and deleted after the broadcast. Signed Cloudflare recordings are configured to expire after 30 days. The included Egress service is sized for one compositor at a time. Add Egress capacity before scheduling overlapping large broadcasts.
+
+Run the API workload in a disposable local PostgreSQL database with a role allowed to create test databases:
+
+```powershell
+npm run build -w api
+$env:MWITU_LOAD_DATABASE_URL = 'postgresql://mwitu@127.0.0.1:16474/postgres'
+$env:MWITU_LOAD_VIEWERS = '18000'
+$env:MWITU_LOAD_CONCURRENCY = '192'
+$env:MWITU_LOAD_STREAMS = '1000'
+node deploy/load-live-audience.mjs
+```
+
+This verifies invite preview, anonymous and signed-in joins, chat writes and reads, and shared guest chat delivery using simulated media. It leaves the production server and Cloudflare out of the test. Use a production-like staging environment to validate real playback, sustained audience connections, and a simultaneous arrival burst before promoting an 18,000-viewer event.
+
 ## LIVE layouts, challenges and room moderation
 
 Hosts can choose 2, 4, 6, or 8 cards in **Guest stage**. The host occupies one card. The selection sets the shared grid and invitation capacity. The host can downsize after clearing the seats that would exceed the new capacity.

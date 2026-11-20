@@ -2,8 +2,8 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoun
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { z } from 'zod';
-import { cleanText, parse, requireUser, uuid } from './infra';
-import { connectedUser, guestIdentityPrefix, liveService, notifyRoom, roomName } from './live';
+import { cleanText, db, parse, requireUser, uuid } from './infra';
+import { connectedUser, guestIdentityPrefix, joinedAudience, liveService, notifyRoom, roomName, streamGuestCount } from './live';
 import { currentMatch, dropStageSeat, endMatch, lockedRoom, matchGuests, member, requireOpen, settle } from './live-store';
 
 const controls = z.discriminatedUnion('action', [
@@ -29,14 +29,17 @@ export class LiveModerationController {
     return lockedRoom(id, async (client, room) => {
       requireModerator((await member(client, room, user)).role);
       const identities = room.ended_at ? [] : (await liveService().listParticipants(roomName(id))).map(person => person.identity);
-      const guests = identities.filter(id => id.startsWith(guestIdentityPrefix)).length;
+      const guests = identities.filter(id => id.startsWith(guestIdentityPrefix)).length + streamGuestCount(id);
       const accounts = identities.filter(id => !id.startsWith(guestIdentityPrefix));
       const { rows: people } = await client.query(`
         SELECT u.id,u.handle,u.display_name,COALESCE(m.moderator,false) AS moderator,
-          m.muted_until,COALESCE(m.banned,false) AS banned,u.id=ANY($2::uuid[]) AS connected
+          m.muted_until,COALESCE(m.banned,false) AS banned,
+          (u.id=ANY($2::uuid[]) OR COALESCE(NOT m.banned AND m.joined_at>now()-interval '2 minutes'
+            AND EXISTS (SELECT 1 FROM live_streams WHERE room_id=$1),false)) AS connected
         FROM users u LEFT JOIN live_members m ON m.user_id=u.id AND m.room_id=$1
         WHERE u.id=ANY($2::uuid[]) OR (m.user_id IS NOT NULL AND
-          (m.moderator OR m.banned OR m.muted_until>now()))
+          (m.moderator OR m.banned OR m.muted_until>now() OR
+            (m.joined_at>now()-interval '2 minutes' AND EXISTS (SELECT 1 FROM live_streams WHERE room_id=$1))))
         ORDER BY connected DESC,u.handle LIMIT 100`, [id, accounts]);
       const { rows: audit } = await client.query(`
         SELECT a.id,a.action,a.details,a.created_at,u.handle AS actor, t.handle AS target
@@ -57,7 +60,7 @@ export class LiveModerationController {
     const id = uuid(raw);
     const { userId, reason } = parse(z.object({ userId: z.uuid(), reason: cleanText(300) }), body);
     if (user.id === userId) throw new BadRequestException('Choose another participant.');
-    await connectedUser(id, user.id);
+    if (!await joinedAudience(db, id, user.id)) await connectedUser(id, user.id);
     await lockedRoom(id, async (client, room) => {
       requireOpen(room);
       await member(client, room, user);

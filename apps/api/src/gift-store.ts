@@ -79,7 +79,7 @@ export async function creditTopup(payment: Topup) {
     ON CONFLICT(user_id) DO UPDATE SET balance=gift_wallets.balance+EXCLUDED.balance`, [payment.id]);
 }
 
-export async function recentGifts(client: PoolClient, roomId: string) {
+export async function recentGifts(client: PoolClient | typeof db, roomId: string) {
   const { rows } = await client.query(`
     SELECT g.id::text,g.gift_id,g.created_at,s.handle AS sender,r.display_name AS recipient
     FROM live_gifts g JOIN users s ON s.id=g.sender_id JOIN users r ON r.id=g.recipient_id
