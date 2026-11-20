@@ -1,14 +1,15 @@
 {
   "latest": {
-    "version": "1.0.5",
-    "versionCode": 6,
+    "version": "1.0.6",
+    "versionCode": 7,
     "minSdk": 24,
     "notes": [
-      "Portrait videos now fill the screen behind the navigation and action icons.",
-      "Wide videos keep their full frame with a blurred video backdrop."
+      "Swipe left or right between photos in a post.",
+      "Create photo posts with up to eight images."
     ]
   },
   "previous": [
+    "1.0.5",
     "1.0.4",
     "1.0.3",
     "1.0.2",
