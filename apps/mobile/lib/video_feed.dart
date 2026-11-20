@@ -13,10 +13,11 @@ import 'mwitu_links.dart';
 const _feedNavHeight = 58.0;
 
 class _Clip {
-  const _Clip(this.id, this.caption, this.handle);
+  const _Clip(this.id, this.caption, this.handle, this.photos);
   final String id;
   final String caption;
   final String handle;
+  final List<String> photos;
 
   Uri get thumbnail => Uri.https(mwituHost, '/media/$id.jpg');
   Uri get playback => Uri.https(mwituHost, '/media/$id.mp4');
@@ -58,7 +59,12 @@ class _VideoFeedState extends State<VideoFeed> with WidgetsBindingObserver {
     });
     try {
       final response = await _client
-          .get(Uri.https(mwituApi, '/api/videos', reset ? null : _cursor))
+          .get(
+            Uri.https(mwituApi, '/api/videos', {
+              'galleries': 'true',
+              if (!reset) ...?_cursor,
+            }),
+          )
           .timeout(const Duration(seconds: 12));
       if (response.statusCode != 200) {
         throw const FormatException('Feed unavailable');
@@ -75,6 +81,10 @@ class _VideoFeedState extends State<VideoFeed> with WidgetsBindingObserver {
               item['id'] as String,
               item['caption'] as String? ?? '',
               item['handle'] as String? ?? '',
+              (item['image_ids'] as List? ?? const [])
+                  .whereType<String>()
+                  .where(validVideoId)
+                  .toList(),
             ),
           );
       if (!mounted) return;
@@ -328,6 +338,7 @@ class _VideoCardState extends State<_VideoCard> {
   VideoPlayerController? _video;
   bool _failed = false;
   bool _paused = false;
+  int _photo = 0;
 
   @override
   void initState() {
@@ -336,6 +347,7 @@ class _VideoCardState extends State<_VideoCard> {
   }
 
   Future<void> _start() async {
+    if (widget.clip.photos.isNotEmpty) return;
     final video = VideoPlayerController.networkUrl(widget.clip.playback);
     _video = video;
     try {
@@ -380,6 +392,7 @@ class _VideoCardState extends State<_VideoCard> {
   @override
   Widget build(BuildContext context) {
     final video = _video;
+    final photos = widget.clip.photos;
     final initialized = video?.value.isInitialized ?? false;
     final wide = initialized && video!.value.aspectRatio > 1;
     final safe = MediaQuery.viewPaddingOf(context);
@@ -396,7 +409,38 @@ class _VideoCardState extends State<_VideoCard> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (!initialized || wide)
+          if (photos.isNotEmpty)
+            PageView.builder(
+              itemCount: photos.length,
+              allowImplicitScrolling: true,
+              onPageChanged: (index) => setState(() => _photo = index),
+              itemBuilder: (context, index) => Image.network(
+                Uri.https(mwituHost, '/media/${photos[index]}.jpg').toString(),
+                fit: BoxFit.contain,
+                semanticLabel: 'Photo ${index + 1} of ${photos.length}',
+                errorBuilder: (_, _, _) =>
+                    const Center(child: Text('Photo unavailable')),
+              ),
+            ),
+          if (photos.length > 1)
+            Positioned(
+              top: safe.top + 72,
+              right: safe.right + 12,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0xcf171022),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  child: Text('${_photo + 1} / ${photos.length}'),
+                ),
+              ),
+            ),
+          if (photos.isEmpty && (!initialized || wide))
             ImageFiltered(
               enabled: wide,
               imageFilter: ImageFilter.blur(
@@ -501,16 +545,17 @@ class _VideoCardState extends State<_VideoCard> {
                 spacing: compact ? 4 : 0,
                 runSpacing: 4,
                 children: [
-                  IconButton.filledTonal(
-                    style: controlSize,
-                    tooltip: widget.muted ? 'Turn sound on' : 'Mute',
-                    onPressed: widget.toggleMute,
-                    icon: Icon(
-                      widget.muted
-                          ? Icons.volume_off_rounded
-                          : Icons.volume_up_rounded,
+                  if (photos.isEmpty)
+                    IconButton.filledTonal(
+                      style: controlSize,
+                      tooltip: widget.muted ? 'Turn sound on' : 'Mute',
+                      onPressed: widget.toggleMute,
+                      icon: Icon(
+                        widget.muted
+                            ? Icons.volume_off_rounded
+                            : Icons.volume_up_rounded,
+                      ),
                     ),
-                  ),
                   IconButton.filledTonal(
                     style: controlSize,
                     tooltip: 'Comments',

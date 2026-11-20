@@ -11,6 +11,7 @@ export type Profile = Person & {
 export type Video = {
   id: string; caption: string; handle: string; creator_id: string;
   display_name: string; likes: number; comments: number; liked: boolean; following: boolean; saved: boolean;
+  image_ids?: string[];
 };
 export type Cursor = { at: string; after: string };
 export type Feed = { items: Video[]; next: Cursor | null };
@@ -19,6 +20,7 @@ export type Inbox = { handle: string; display_name: string; body: string };
 export type Message = { id: string; body: string; mine: boolean };
 export const apiOrigin = process.env.NEXT_PUBLIC_API_ORIGIN ?? '';
 export const mediaUrl = (id: string) => apiOrigin + '/media/' + id + '.mp4';
+export const imageUrl = (id: string) => apiOrigin + '/media/' + id + '.jpg';
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);

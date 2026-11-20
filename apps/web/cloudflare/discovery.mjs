@@ -76,10 +76,21 @@ async function watch(head, id) {
   if (!clip) return failure(head);
   const caption = clip.caption.trim();
   const author = clip.display_name || clip.handle;
-  const name = excerpt(caption, 90) || 'Short video by @' + clip.handle;
+  const photos = clip.image_ids ?? [];
+  const name = excerpt(caption, 90) || (photos.length ? 'Photos by @' : 'Short video by @') + clip.handle;
   const title = excerpt(name, 62) + ' | ' + brand;
-  const description = excerpt((caption ? caption + ' — ' : '') + 'Watch this short video by @' + clip.handle + ' on ' + brand + '.', 160);
+  const description = excerpt((caption ? caption + ' — ' : '') + (photos.length ? 'See this photo post by @' : 'Watch this short video by @') + clip.handle + ' on ' + brand + '.', 160);
   const path = watchPath(id);
+  if (photos.length) {
+    const image = mediaUrl(photos[0], 'jpg');
+    const slides = photos.map((photo, i) => '<figure><img src="' + mediaUrl(photo, 'jpg') + '" alt="Photo ' +
+      (i + 1) + ' of ' + photos.length + '"' + (i ? ' loading="lazy"' : '') + '></figure>').join('');
+    return page(head, {
+      title, description, path, image, imageAlt: 'First photo by @' + clip.handle,
+      content: '<article class="watch"><div class="watch-photos" role="region" aria-label="Photo gallery" tabindex="0">' + slides +
+        '</div><h1>' + escape(caption || name) + '</h1><a class="primary" href="/?v=' + id + '&amp;app=1">Open comments and reactions</a></article>',
+    });
+  }
   const poster = mediaUrl(id, 'jpg');
   const playback = mediaUrl(id, 'mp4');
   return page(head, {
@@ -98,7 +109,7 @@ async function watch(head, id) {
 
 async function catalog(head, url, handle) {
   const base = handle ? creatorPath(handle) : '/videos';
-  const query = new URLSearchParams();
+  const query = new URLSearchParams({ galleries: 'true' });
   if (handle) query.set('creator', handle);
   const cursor = new URLSearchParams();
   if (url.searchParams.has('at') || url.searchParams.has('after')) {
@@ -116,7 +127,7 @@ async function catalog(head, url, handle) {
     'Browse the latest public short videos from Kenyan creators on TikTok Mwitu.';
   const path = base + (cursor.size ? '?' + cursor : '');
   const cards = items.map(clip => '<li><a href="' + watchPath(clip.id) + '">' +
-    '<img src="' + mediaUrl(clip.id, 'jpg') + '" alt="" width="320" height="200" loading="lazy">' +
+    '<img src="' + mediaUrl(clip.image_ids?.[0] ?? clip.id, 'jpg') + '" alt="" width="320" height="200" loading="lazy">' +
     '<span class="clip-title">' + escape(excerpt(clip.caption, 120) || 'Short video') + '</span><small>@' + escape(clip.handle) +
     '</small></a></li>').join('');
   return page(head, { title: heading + ' | ' + brand, description, path,

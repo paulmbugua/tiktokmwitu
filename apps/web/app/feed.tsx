@@ -14,7 +14,8 @@ import InstallApp from './install-app';
 import GiftWallet from './gift-wallet';
 import LiveInvitePlans from './live-invite-plans';
 import Promote, { promotionAction, promotionEvent, usePlacementView, type Placement } from './promote';
-import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Video } from './client';
+import { api, imageUrl, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Video } from './client';
+import PhotoGallery from './photo-gallery';
 import CreatorProfile from './creator-profile';
 import { uploadVideo, type UploadJob } from './profile-upload';
 import VideoDescription, { DescriptionText, topicFromSearch } from './video-description';
@@ -94,6 +95,7 @@ function Clip({ video, root, muted, onMute, children, profile, hashtag, manage, 
   const [wide, setWide] = useState(false);
   const [adRef,setAdRef]=useState<HTMLElement|null>(null);
   const source = mediaUrl(video.id);
+  const images = video.image_ids ?? [];
   usePlacementView(adRef,promotion);
   useEffect(() => {
     const element = section.current;
@@ -111,6 +113,7 @@ function Clip({ video, root, muted, onMute, children, profile, hashtag, manage, 
       <div className={wide ? 'stage stage-wide' : 'stage'} style={wide ? {
         '--clip-backdrop': `url("${source.replace(/\.mp4$/, '.jpg')}")`,
       } as CSSProperties : undefined}>
+        {images.length ? <PhotoGallery images={images} /> : <>
         <video ref={player} src={source} loop muted={muted} playsInline preload="none"
           onResize={event => {
             const { videoWidth, videoHeight } = event.currentTarget;
@@ -127,7 +130,8 @@ function Clip({ video, root, muted, onMute, children, profile, hashtag, manage, 
             {muted ? <VolumeX size={19} /> : <Volume2 size={19} />}
           </button>
         </div>
-        <div className="actions" role="group" aria-label="Video actions">{children}</div>
+        </>}
+        <div className="actions" role="group" aria-label={images.length ? 'Photo post actions' : 'Video actions'}>{children}</div>
       </div>
       <div className="clip-info">
         <div className="clip-byline">
@@ -167,6 +171,7 @@ export default function Home() {
   const [google, setGoogle] = useState<'web' | 'android' | null>(null);
   const [nativeApp, setNativeApp] = useState(false);
   const [fileName, setFileName] = useState('');
+  const [postType, setPostType] = useState<'video' | 'photo'>('video');
   const [uploads, setUploads] = useState<UploadJob[]>([]);
   const uploadTail = useRef(Promise.resolve());
   const activeUploads = useRef(new Set<string>());
@@ -260,7 +265,7 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [feedback]);
 
-  const filters = new URLSearchParams();
+  const filters = new URLSearchParams({ galleries: 'true' });
   if (tab === 'Following') filters.set('following', 'true');
   if (tab === 'Discover' && query) {
     const topic = topicFromSearch(query);
@@ -287,6 +292,7 @@ export default function Home() {
   function open(next: Panel) {
     setDialogError('');
     setFileName('');
+    if (next.kind === 'upload') setPostType('video');
     if (next.kind === 'inbox' || next.kind === 'chat') setUnread(false);
     setPanel(next);
   }
@@ -319,8 +325,8 @@ export default function Home() {
       try {
         if (uploadOwner.current !== job.owner) throw new Error('Sign in again to retry this upload.');
         update({ stage: 'uploading' });
-        const videoId = await uploadVideo(queued, (stage, percent) => update({ stage, percent }));
-        update({ stage: 'published', videoId, file: undefined });
+        const post = await uploadVideo(queued, (stage, percent) => update({ stage, percent }));
+        update({ stage: 'published', videoId: post.id, imageIds: post.image_ids, file: undefined, photos: undefined });
         refresh();
       } catch (error) { update({ stage: 'failed', error: (error as Error).message }); }
       finally { activeUploads.current.delete(job.id); }
@@ -426,12 +432,18 @@ export default function Home() {
     if (panel.kind === 'upload') {
       if (!user) { open({ kind: 'auth', destination: 'upload' }); return; }
       const file = data.get('video');
+      const photos = data.getAll('photos').filter((entry): entry is File => entry instanceof File && entry.size > 0);
       const caption = String(data.get('caption') ?? '').trim();
-      if (!(file instanceof File) || !file.size || !caption) {
-        setDialogError('Choose a video and enter a description.');
+      if (!caption || (postType === 'photo' ? !photos.length : !(file instanceof File) || !file.size)) {
+        setDialogError('Choose media and enter a description.');
         return;
       }
-      queueUpload({ id: crypto.randomUUID(), owner: user.id, caption, file, stage: 'queued', percent: 0 });
+      if (photos.length > 8 || photos.some(photo => photo.size > 6 * 1024 * 1024)) {
+        setDialogError('Choose up to 8 photos, each under 6 MB.');
+        return;
+      }
+      queueUpload({ id: crypto.randomUUID(), owner: user.id, caption, file: file instanceof File ? file : undefined,
+        photos, stage: 'queued', percent: 0 });
       open({ kind: 'profile', handle: user.handle });
       return;
     }
@@ -515,7 +527,7 @@ export default function Home() {
   const titles = {
     auth: mode === 'register' ? 'Join Tiktok mwitu' : 'Welcome back',
     googleSignup: 'Choose your handle',
-    upload: 'Post a video', comments: 'Comments', profile: panel?.kind === 'profile' && panel.handle === user?.handle ? 'Your profile' : 'Creator profile',
+    upload: 'Create a post', comments: 'Comments', profile: panel?.kind === 'profile' && panel.handle === user?.handle ? 'Your profile' : 'Creator profile',
     inbox: 'Inbox', chat: panel && 'handle' in panel ? '@' + panel.handle : 'Chat',
     report: 'Report video', account: 'Your account', live: 'Live broadcasts', saved: 'Saved videos', wallet: 'Coin wallet', invites:'LIVE invite plans',promote:'Promote',
   };
@@ -541,7 +553,7 @@ export default function Home() {
       </nav>
         <a className="catalog-link" href="/videos">Browse Kenyan videos</a>
         <a className="catalog-link" href="/download">Get the Android app</a>
-      <button className="primary post" aria-label="Post a video" onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={22} /> <span>Post a video</span></button>
+      <button className="primary post" aria-label="Create a post" onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={22} /> <span>Create a post</span></button>
       <button className="account" aria-label={user ? 'Your profile' : 'Log in / Sign up'} onClick={myProfile}>
         {user ? <Avatar name={user.display_name} /> : <UserRound size={19} />} <span>{user ? '@' + user.handle : 'Log in / Sign up'}</span>
       </button>
@@ -599,7 +611,8 @@ export default function Home() {
               active={video.liked} onClick={() => change('/videos/' + video.id + '/like', 'PUT', { enabled: !video.liked },
                 item => item.id === video.id ? { ...item, liked: !video.liked, likes: Math.max(0, item.likes + (video.liked ? -1 : 1)) } : item)} />
             <Action icon={<MessageCircle size={22} />} label="Comments" onClick={() => open({ kind: 'comments', video })} />
-            <a className="action" href={mediaUrl(video.id) + '?download=1'} download aria-label="Save video" title="Save video">
+            <a className="action" href={(video.image_ids?.[0] ? imageUrl(video.image_ids[0]) : mediaUrl(video.id)) + '?download=1'}
+              download aria-label={video.image_ids?.length ? 'Save first photo' : 'Save video'} title={video.image_ids?.length ? 'Save first photo' : 'Save video'}>
               <span aria-hidden="true"><ArrowDownToLine size={21} /></span>
             </a>
             <Action icon={<Bookmark size={21} fill={video.saved ? 'currentColor' : 'none'} />} label={video.saved ? 'Remove bookmark' : 'Bookmark'}
@@ -614,7 +627,7 @@ export default function Home() {
               {!ready && <p><a className="catalog-link" href="/videos">Browse videos</a> · <a className="catalog-link" href="/live">Explore LIVE</a></p>}
               {feedError ? <button className="secondary" onClick={refresh}>Try again</button> : ready && (tab === 'Following'
                 ? <button className="secondary" onClick={() => choose('For You')}>Browse For You</button>
-                : !query && <button className="primary" onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={19} /> Post a video</button>)}
+                : !query && <button className="primary" onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={19} /> Create a post</button>)}
             </div>
           </div>}
           {!shared && (extra ?? feed?.data)?.next && <div className="load"><button className="secondary" disabled={mutation} onClick={() => void more()}><ArrowDownToLine size={16} /> Load more</button></div>}
@@ -675,7 +688,24 @@ export default function Home() {
         <button className="primary" disabled={pending}>Finish creating account</button>
       </form>}
       {panel.kind === 'upload' && <form onSubmit={submit}>
-        <label className="drop">
+        <div className="post-type" role="group" aria-label="Post format">
+          {(['video', 'photo'] as const).map(type => <button key={type} type="button" className="secondary"
+            aria-pressed={postType === type} onClick={() => { setPostType(type); setFileName(''); setDialogError(''); }}>
+            {type === 'video' ? 'Video' : 'Photos'}
+          </button>)}
+        </div>
+        {postType === 'photo' ? <label className="drop">
+          <input className="upload-input" aria-label="Choose photos" type="file" name="photos" multiple required
+            accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={event => {
+              const files = Array.from(event.target.files ?? []);
+              event.target.setCustomValidity(files.length > 8 || files.some(file => file.size > 6 * 1024 * 1024)
+                ? 'Choose up to 8 photos, each under 6 MB.' : '');
+              setFileName(files.length ? files.length + (files.length === 1 ? ' photo selected' : ' photos selected') : '');
+            }} />
+          <span className="upload-picker"><UploadCloud size={24} /> Choose photos</span>
+          {fileName && <span className="upload-file">{fileName}</span>}
+          <small>JPEG, PNG or WebP · Up to 8 photos · 6 MB each</small>
+        </label> : <label className="drop">
           <input className="upload-input" aria-label="Choose a Video." type="file" name="video" accept=".mp4,.mov,.webm,video/mp4,video/webm,video/quicktime" required onChange={event => {
             const file = event.target.files?.[0];
             event.target.setCustomValidity(file && file.size > 48 * 1024 * 1024 ? 'Choose a video under 48 MB.' : '');
@@ -684,9 +714,9 @@ export default function Home() {
           <span className="upload-picker"><UploadCloud size={24} /> Choose a Video.</span>
           {fileName && <span className="upload-file">{fileName}</span>}
           <small>MP4, MOV or WebM · 48 MB · First 60 seconds</small>
-        </label>
+        </label>}
         <VideoDescription />
-        <button className="primary">Publish video</button>
+        <button className="primary">{postType === 'photo' ? 'Publish photos' : 'Publish video'}</button>
       </form>}
       {panel.kind === 'comments' && <>
         <div className="list">

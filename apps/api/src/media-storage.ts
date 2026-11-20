@@ -1,7 +1,8 @@
 import { createHmac } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { ServiceUnavailableException } from '@nestjs/common';
-import { db } from './infra';
+import { db, mediaDir } from './infra';
 
 const origin = process.env.R2_MEDIA_ORIGIN;
 const secret = process.env.MEDIA_STORAGE_SECRET;
@@ -65,14 +66,15 @@ export async function cleanCloudVideo(id: string) {
 }
 
 export async function sweepCloudMedia() {
-  if (!useR2 || cleaning) return;
+  if (cleaning) return;
   cleaning = true;
   try {
-    const { rows } = await db.query<{ id: string; thumbnail_only: boolean }>(
-      'SELECT id,thumbnail_only FROM video_media_cleanup ORDER BY queued_at LIMIT 20');
-    for (const { id, thumbnail_only } of rows) {
+    const { rows } = await db.query<{ id: string; thumbnail_only: boolean; local_image: boolean }>(
+      'SELECT id,thumbnail_only,local_image FROM video_media_cleanup WHERE $1 OR local_image ORDER BY queued_at LIMIT 20', [useR2]);
+    for (const { id, thumbnail_only, local_image } of rows) {
       if (thumbnail_only) {
-        await removeCloudThumbnail(id).then(() => db.query('DELETE FROM video_media_cleanup WHERE id=$1', [id])).catch(() => undefined);
+        const removed = local_image ? rm(join(mediaDir, 'profiles', id + '.jpg'), { force: true }) : removeCloudThumbnail(id);
+        await removed.then(() => db.query('DELETE FROM video_media_cleanup WHERE id=$1', [id])).catch(() => undefined);
       } else await cleanCloudVideo(id).catch(() => undefined);
     }
   } finally {

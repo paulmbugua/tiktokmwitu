@@ -21,7 +21,7 @@ import { ProfileImagesController, readProfileImage } from './profile-images';
 import { LiveController, pushGuestBroadcasts, reconcileLive } from './live';
 import { LiveStageController } from './live-stage';
 import { LiveModerationController } from './live-moderation';
-import { playbackUrl, sweepCloudMedia, useR2, type MediaStorage } from './media-storage';
+import { playbackUrl, sweepCloudMedia, type MediaStorage } from './media-storage';
 import { getVideoThumbnail } from './media';
 import { liveSchema } from './live-store';
 import { VideosController } from './videos';
@@ -98,8 +98,10 @@ async function start() {
       const [ , id, extension] = match;
       const video = await db.query<{ media_storage: MediaStorage }>('SELECT media_storage FROM videos WHERE id=$1', [id]);
       if (!video.rowCount && extension === 'jpg') {
-        const { rows: [photo] } = await db.query<{ id: string; storage: MediaStorage }>('SELECT id,storage FROM profile_images WHERE id=$1', [id]);
+        const { rows: [photo] } = await db.query<{ id: string; storage: MediaStorage }>(`
+          SELECT id,storage FROM profile_images WHERE id=$1 UNION ALL SELECT id,storage FROM post_photos WHERE id=$1`, [id]);
         if (!photo) { res.sendStatus(404); return; }
+        if (req.query.download === '1') res.attachment('mwitu-' + id + '.jpg');
         res.type('jpg').send(await readProfileImage(photo));
         return;
       }
@@ -177,10 +179,8 @@ async function start() {
   inviteSweep.unref();
   const promotionSweep = setInterval(() => void settlePromotions(), 12000);
   promotionSweep.unref();
-  if (useR2) {
-    const mediaSweep = setInterval(() => void sweepCloudMedia().catch(error => console.error('Media cleanup failed', error)), 60000);
-    mediaSweep.unref();
-  }
+  const mediaSweep = setInterval(() => void sweepCloudMedia().catch(error => console.error('Media cleanup failed', error)), 60000);
+  mediaSweep.unref();
   await app.listen(Number(process.env.API_PORT ?? 4000), process.env.API_HOST ?? '127.0.0.1');
 }
 

@@ -1,9 +1,10 @@
 
 import {
   BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post,
-  Put, Query, Req, UploadedFile, UseGuards, UseInterceptors,
+  Put, Query, Req, UploadedFile, UploadedFiles, UseGuards, UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+import { randomUUID } from 'node:crypto';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { z } from 'zod';
@@ -13,6 +14,7 @@ import {
 } from './infra';
 import { removeVideo, saveVideo } from './media';
 import type { MediaStorage } from './media-storage';
+import { discardImage, prepareImage, storeImage } from './profile-images';
 
 const videoFields = z.object({ caption: cleanText(500), requestId: z.uuid().optional(), owner: z.uuid().optional() });
 const textBody = z.object({ body: cleanText(500) });
@@ -21,6 +23,7 @@ const clientCursor = z.object({ at: z.iso.datetime(), id: z.uuid() });
 const sitemapPageSize = 1000;
 const projection = `
   v.id,v.caption,v.created_at,u.handle,u.display_name,u.id AS creator_id,
+  ARRAY(SELECT id FROM post_photos p WHERE p.post_id=v.id ORDER BY position) AS image_ids,
   (SELECT count(*)::int FROM likes l WHERE l.video_id=v.id) AS likes,
   (SELECT count(*)::int FROM comments c WHERE c.video_id=v.id) AS comments,
   EXISTS(SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=$1) AS liked,
@@ -45,12 +48,12 @@ export class VideosController {
   async videoSitemap(@Query('page') raw?: string) {
     if (raw === undefined) {
       const { rows: [result] } = await db.query<{ pages: number }>(
-        'SELECT ceil(count(*)::numeric / $1)::int AS pages FROM videos', [sitemapPageSize]);
+        'SELECT ceil(count(*)::numeric / $1)::int AS pages FROM videos WHERE NOT is_gallery', [sitemapPageSize]);
       return { pages: Math.max(1, result.pages) };
     }
     const page = parse(z.coerce.number().int().min(1).max(50000), raw);
     const { rows } = await db.query(
-      'SELECT id,caption,created_at FROM videos ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2',
+      'SELECT id,caption,created_at FROM videos WHERE NOT is_gallery ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2',
       [sitemapPageSize, (page - 1) * sitemapPageSize]);
     return { items: rows };
   }
@@ -64,6 +67,7 @@ export class VideosController {
       creator: handleSchema.optional(),
       liked: z.literal('true').optional(),
       topic: z.string().regex(/^[\p{L}\p{N}_]{1,48}$/u).optional(),
+      galleries: z.literal('true').optional(),
       at: clientCursor.shape.at.optional(),
       after: clientCursor.shape.id.optional(),
     }), query);
@@ -77,8 +81,9 @@ export class VideosController {
       AND ($5::timestamptz IS NULL OR (v.created_at,v.id)<($5,$6::uuid))
       AND (NOT $7::boolean OR EXISTS (SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=$1))
       AND ($8::text IS NULL OR v.caption ~* ('(^|[^[:alnum:]_#])#' || $8 || '([^[:alnum:]_]|$)'))
+      AND ($9::boolean OR NOT v.is_gallery)
       ORDER BY v.created_at DESC,v.id DESC LIMIT 13`,
-      [user?.id ?? null, input.following === 'true', input.q || null, input.creator ?? null, input.at ?? null, input.after ?? null, input.liked === 'true', input.topic ?? null]);
+      [user?.id ?? null, input.following === 'true', input.q || null, input.creator ?? null, input.at ?? null, input.after ?? null, input.liked === 'true', input.topic ?? null, input.galleries === 'true']);
     return feedPage(rows);
   }
 
@@ -140,6 +145,54 @@ export class VideosController {
     }
     publishFeed();
     return { id: mediaId };
+  }
+
+  @Post('photo-posts')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(SessionGuard)
+  @UseInterceptors(FilesInterceptor('photos', 8, { limits: { fileSize: 6 * 1024 * 1024, files: 8, fields: 3, fieldSize: 2048 } }))
+  async uploadPhotos(@Req() req: Request, @Body() body: unknown, @UploadedFiles() files: { buffer: Buffer }[] = []) {
+    const user = await requireUser(req);
+    const { caption, requestId, owner } = parse(videoFields, body);
+    if (owner && owner !== user.id) throw new BadRequestException('Sign in to the account that started this upload.');
+    if (!files.length || files.some(file => !file.buffer.length)) throw new BadRequestException('Choose at least one photo.');
+    const findPrior = async () => (await db.query<{ id: string; image_ids: string[] }>(`
+      SELECT v.id,ARRAY(SELECT p.id FROM post_photos p WHERE p.post_id=v.id ORDER BY p.position) AS image_ids
+      FROM videos v WHERE v.user_id=$1 AND v.upload_request_id=$2`, [user.id, requestId ?? null])).rows[0];
+    const prior = await findPrior();
+    if (prior) return prior;
+    const photos: Awaited<ReturnType<typeof storeImage>>[] = [];
+    let saved = false;
+    try {
+      for (const file of files) photos.push(await storeImage(await prepareImage(file.buffer, 'post')));
+      const id = randomUUID();
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        const inserted = await client.query(`
+          INSERT INTO videos(id,user_id,caption,is_gallery,upload_request_id) VALUES ($1,$2,$3,true,$4)
+          ON CONFLICT (user_id,upload_request_id) DO NOTHING RETURNING id`, [id, user.id, caption, requestId ?? null]);
+        if (!inserted.rowCount) {
+          await client.query('ROLLBACK');
+          const published = await findPrior();
+          if (!published) throw new NotFoundException('This post is no longer available.');
+          return published;
+        }
+        for (const [position, photo] of photos.entries()) {
+          await client.query('INSERT INTO post_photos(id,post_id,position,storage) VALUES ($1,$2,$3,$4)',
+            [photo.id, id, position, photo.storage]);
+        }
+        await client.query('COMMIT');
+        saved = true;
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally { client.release(); }
+      publishFeed();
+      return { id, image_ids: photos.map(photo => photo.id) };
+    } finally {
+      if (!saved) await Promise.allSettled(photos.map(discardImage));
+    }
   }
 
   @Delete('videos/:id')

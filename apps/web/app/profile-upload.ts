@@ -7,6 +7,8 @@ export type UploadJob = {
   owner: string;
   caption: string;
   file?: File;
+  photos?: File[];
+  imageIds?: string[];
   stage: 'queued' | 'uploading' | 'processing' | 'failed' | 'published';
   percent: number;
   error?: string;
@@ -14,15 +16,16 @@ export type UploadJob = {
 };
 
 export function uploadVideo(job: UploadJob, update: (stage: 'uploading' | 'processing', percent: number) => void) {
-  return new Promise<string>((resolve, reject) => {
-    if (!job.file) { reject(new Error('Choose a video to upload.')); return; }
+  return new Promise<{ id: string; image_ids?: string[] }>((resolve, reject) => {
+    if (!job.file && !job.photos?.length) { reject(new Error('Choose media to upload.')); return; }
     const data = new FormData();
     data.append('caption', job.caption);
     data.append('requestId', job.id);
     data.append('owner', job.owner);
-    data.append('video', job.file);
+    if (job.file) data.append('video', job.file);
+    else for (const photo of job.photos ?? []) data.append('photos', photo);
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', apiOrigin + '/api/videos');
+    xhr.open('POST', apiOrigin + (job.file ? '/api/videos' : '/api/photo-posts'));
     xhr.withCredentials = true;
     xhr.responseType = 'json';
     xhr.timeout = 180000;
@@ -32,7 +35,7 @@ export function uploadVideo(job: UploadJob, update: (stage: 'uploading' | 'proce
     };
     xhr.upload.onload = () => update('processing', 100);
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300 && typeof xhr.response?.id === 'string') resolve(xhr.response.id);
+      if (xhr.status >= 200 && xhr.status < 300 && typeof xhr.response?.id === 'string') resolve(xhr.response);
       else reject(new Error(typeof xhr.response?.message === 'string' ? xhr.response.message : 'Upload could not finish. Try again.'));
     };
     xhr.onerror = () => reject(new Error('Connection lost. Retry to finish publishing.'));

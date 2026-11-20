@@ -25,7 +25,7 @@ function formatOf(bytes: Buffer) {
   throw new BadRequestException('Choose a JPEG, PNG or WebP image.');
 }
 
-async function prepareImage(bytes: Buffer, kind: z.infer<typeof kindSchema>) {
+export async function prepareImage(bytes: Buffer, kind: z.infer<typeof kindSchema> | 'post') {
   const format = formatOf(bytes);
   const folder = await mkdtemp(join(process.env.MEDIA_WORK_DIR ?? mediaDir, 'profile-'));
   try {
@@ -33,11 +33,15 @@ async function prepareImage(bytes: Buffer, kind: z.infer<typeof kindSchema>) {
     await writeFile(input, bytes);
     const [width, height] = kind === 'avatar' ? [512, 512] : [1200, 540];
     const crop = `crop=w='min(iw,ih*${width}/${height})':h='min(ih,iw*${height}/${width})'`;
+    const filter = kind === 'post'
+      ? "scale=w='min(iw,1080)':h='min(ih,1440)':force_original_aspect_ratio=decrease:force_divisible_by=2"
+      : `${crop},scale=${width}:${height}`;
     const { stdout } = await ffmpeg(process.env.FFMPEG_PATH ?? 'ffmpeg', [
       '-nostdin', '-hide_banner', '-loglevel', 'error', '-protocol_whitelist', 'file',
       '-threads', '1', '-max_pixels', '40000000', '-f', format, '-i', input, '-map', '0:v:0',
-      '-filter_threads', '1', '-vf', `${crop},scale=${width}:${height},setsar=1`,
-      '-frames:v', '1', '-map_metadata', '-1', '-c:v', 'mjpeg', '-threads', '1', '-q:v', '6', '-f', 'image2pipe', 'pipe:1',
+      '-filter_threads', '1', '-vf', filter + ',setsar=1',
+      '-frames:v', '1', '-map_metadata', '-1', '-c:v', 'mjpeg', '-threads', '1',
+      '-q:v', kind === 'post' ? '8' : '6', '-f', 'image2pipe', 'pipe:1',
     ], { encoding: 'buffer', maxBuffer: outputLimit, timeout: 12000, windowsHide: true });
     if (!stdout.length) throw new Error('Image produced no output');
     return stdout;
@@ -49,6 +53,19 @@ async function prepareImage(bytes: Buffer, kind: z.infer<typeof kindSchema>) {
 }
 
 const localPath = (id: string) => join(directory, id + '.jpg');
+export async function storeImage(image: Buffer): Promise<ImageRow> {
+  const id = randomUUID();
+  if (useR2) await putCloudThumbnail(id, image);
+  else {
+    await mkdir(directory, { recursive: true });
+    await writeFile(localPath(id), image, { flag: 'wx' });
+  }
+  return { id, storage: useR2 ? 'r2' : 'local' };
+}
+
+export function discardImage({ id, storage }: ImageRow) {
+  return storage === 'r2' ? removeCloudThumbnail(id) : rm(localPath(id), { force: true });
+}
 
 export async function readProfileImage({ id, storage }: ImageRow) {
   if (storage === 'local') return readFile(localPath(id));
@@ -94,16 +111,11 @@ export class ProfileImagesController {
     const kind = parse(kindSchema, raw);
     if (!file?.buffer.length) throw new BadRequestException('Choose a photo.');
     const image = await prepareImage(file.buffer, kind);
-    const next: ImageRow = { id: randomUUID(), storage: useR2 ? 'r2' : 'local' };
+    const next = await storeImage(image);
     try {
-      if (useR2) await putCloudThumbnail(next.id, image);
-      else {
-        await mkdir(directory, { recursive: true });
-        await writeFile(localPath(next.id), image, { flag: 'wx' });
-      }
       await changePhoto(owner.id, kind, next);
     } catch (error) {
-      await (useR2 ? removeCloudThumbnail(next.id) : rm(localPath(next.id), { force: true })).catch(() => undefined);
+      await discardImage(next).catch(() => undefined);
       throw error;
     }
     return { id: next.id };

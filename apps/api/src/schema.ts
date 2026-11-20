@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS videos (
 CREATE INDEX IF NOT EXISTS videos_feed ON videos(created_at DESC, id DESC);
 ALTER TABLE videos ALTER COLUMN county SET DEFAULT '';
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS upload_request_id uuid;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_gallery boolean NOT NULL DEFAULT false;
 CREATE UNIQUE INDEX IF NOT EXISTS videos_upload_request ON videos(user_id,upload_request_id);
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS media_storage text NOT NULL DEFAULT 'local'
   CHECK (media_storage IN ('local','r2'));
@@ -40,6 +41,23 @@ CREATE TABLE IF NOT EXISTS video_media_cleanup (
   queued_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE video_media_cleanup ADD COLUMN IF NOT EXISTS thumbnail_only boolean NOT NULL DEFAULT false;
+ALTER TABLE video_media_cleanup ADD COLUMN IF NOT EXISTS local_image boolean NOT NULL DEFAULT false;
+CREATE TABLE IF NOT EXISTS post_photos (
+  id uuid PRIMARY KEY,
+  post_id uuid NOT NULL REFERENCES videos ON DELETE CASCADE,
+  position smallint NOT NULL CHECK (position BETWEEN 0 AND 7),
+  storage text NOT NULL CHECK (storage IN ('local','r2')),
+  UNIQUE(post_id,position)
+);
+CREATE OR REPLACE FUNCTION queue_removed_post_photo() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  INSERT INTO video_media_cleanup(id,thumbnail_only,local_image)
+  VALUES (OLD.id,true,OLD.storage='local') ON CONFLICT DO NOTHING;
+  RETURN OLD;
+END;
+$$;
+CREATE OR REPLACE TRIGGER post_photo_cleanup AFTER DELETE ON post_photos
+  FOR EACH ROW EXECUTE FUNCTION queue_removed_post_photo();
 CREATE INDEX IF NOT EXISTS videos_creator ON videos(user_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS follows (
   follower_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,

@@ -1,6 +1,6 @@
 'use client';
 
-import { Bookmark, Camera, Clapperboard, Grid3X3, Heart, ImagePlus, Menu, Pencil, Plus, RotateCcw, X } from 'lucide-react';
+import { Bookmark, Camera, Clapperboard, Grid3X3, Heart, ImagePlus, Images, Menu, Pencil, Plus, RotateCcw, X } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, mediaUrl, send, useData, type Feed, type Person, type Video } from './client';
 import type { UploadJob } from './profile-upload';
@@ -58,32 +58,34 @@ function ProfilePhoto({ kind, id, changed }: { kind: 'avatar' | 'cover'; id?: st
   </div>;
 }
 
-function VideoTile({ id, caption, likes, show }: {
-  id: string; caption: string; likes?: number; show: (id: string) => void;
+function VideoTile({ id, caption, likes, images, show }: {
+  id: string; caption: string; likes?: number; images?: string[]; show: (id: string) => void;
 }) {
   const [failed, setFailed] = useState(false);
-  return <button className="creator-tile" title={caption} aria-label={'Play ' + caption} onClick={() => show(id)}>
-    {failed ? <Clapperboard aria-hidden="true" /> : <img src={poster(id)} alt="" crossOrigin="anonymous" loading="lazy" decoding="async" onError={() => setFailed(true)} />}
+  return <button className="creator-tile" title={caption} aria-label={(images?.length ? 'Open photos for ' : 'Play ') + caption} onClick={() => show(id)}>
+    {failed ? <Clapperboard aria-hidden="true" /> : <img src={poster(images?.[0] ?? id)} alt="" crossOrigin="anonymous" loading="lazy" decoding="async" onError={() => setFailed(true)} />}
+    {images?.length ? <span className="creator-photo-count" aria-label={images.length + ' photos'}><Images size={14} />{images.length}</span> : null}
     {likes !== undefined && <span className="creator-tile-count"><Heart size={13} />{count.format(likes)}<span className="sr-only"> likes</span></span>}
   </button>;
 }
 
 function UploadTile({ job, retry, dismiss }: { job: UploadJob; retry: () => void; dismiss: () => void }) {
   const [preview, setPreview] = useState('');
+  const file = job.file ?? job.photos?.[0];
   useEffect(() => {
-    if (!job.file) return;
-    const url = URL.createObjectURL(job.file);
+    if (!file) return;
+    const url = URL.createObjectURL(file);
     setPreview(url);
     return () => URL.revokeObjectURL(url);
-  }, [job.file]);
+  }, [file]);
   const label = job.stage === 'queued' ? 'Queued' : job.stage === 'processing' ? 'Processing' : 'Uploading';
   return <div className="creator-tile creator-upload">
     <Clapperboard aria-hidden="true" />
-    {preview && <video src={preview} muted playsInline preload="metadata" aria-hidden="true"
+    {preview && (job.photos?.length ? <img src={preview} alt="" /> : <video src={preview} muted playsInline preload="metadata" aria-hidden="true"
       onLoadedMetadata={event => {
         const player = event.currentTarget;
         if (Number.isFinite(player.duration) && player.duration > 0) player.currentTime = Math.min(0.25, player.duration / 2);
-      }} />}
+      }} />)}
     <div className="creator-upload-overlay">
       {job.stage === 'failed' ? <>
         <span title={job.error}>Upload failed</span>
@@ -122,7 +124,7 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
   const result = useData<import('./client').Profile>('/creators/' + encodeURIComponent(handle), revision + photoRevision);
   const profile = result?.data;
   const active = mine ? collection : 'Posts';
-  const path = active === 'Saved' ? '/videos/saved?' : active === 'Liked' ? '/videos?liked=true&' : '/videos?creator=' + encodeURIComponent(handle) + '&';
+  const path = active === 'Saved' ? '/videos/saved?' : active === 'Liked' ? '/videos?galleries=true&liked=true&' : '/videos?galleries=true&creator=' + encodeURIComponent(handle) + '&';
   const page = useData<Feed>(path, revision);
   const clips: Video[] = Array.from(new Map([...(page?.data?.items ?? []), ...(extra?.items ?? [])].map(clip => [clip.id, clip])).values());
   const next = (extra ?? page?.data)?.next;
@@ -183,7 +185,7 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
       {profile?.website && <a className="creator-site" href={profile.website} rel="noopener noreferrer" target="_blank">{profile.website}</a>}
       <div className="creator-actions">
         {mine ? <>
-          <button className="primary" onClick={post}><Plus size={17} /> Post a video</button>
+          <button className="primary" onClick={post}><Plus size={17} /> Create a post</button>
           <button className="secondary" disabled={!profile || editing} onClick={() => { setError(''); setEditing(true); }}><Pencil size={16} /> Edit profile</button>
         </> : profile && <>
           <button className="primary" onClick={() => follow(!profile.following)}>{profile.following ? 'Following' : 'Follow'}</button>
@@ -215,9 +217,9 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
     </nav>
     <div className="creator-grid">
       {currentJobs.map(job => job.videoId
-        ? !clips.some(clip => clip.id === job.videoId) && <VideoTile key={job.id} id={job.videoId} caption={job.caption} show={show} />
+        ? !clips.some(clip => clip.id === job.videoId) && <VideoTile key={job.id} id={job.videoId} caption={job.caption} images={job.imageIds} show={show} />
         : <UploadTile key={job.id} job={job} retry={() => retry(job)} dismiss={() => dismiss(job.id)} />)}
-      {clips.map(clip => <VideoTile key={clip.id} id={clip.id} caption={clip.caption} likes={clip.likes} show={show} />)}
+      {clips.map(clip => <VideoTile key={clip.id} id={clip.id} caption={clip.caption} likes={clip.likes} images={clip.image_ids} show={show} />)}
     </div>
     {(result?.error || page?.error || error) && <p className="creator-message error" role="alert">{result?.error ?? page?.error ?? error}</p>}
     {!page && !currentJobs.length && <p className="creator-message" role="status">Loading videos…</p>}

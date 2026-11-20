@@ -160,6 +160,27 @@ dialog[data-panel="profile"] > .dialog-inner > header {
   background: #4a365b; color: #fff; cursor: pointer;
 }
 
+.post-type { display: flex; gap: 8px; }
+.post-type button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.creator-photo-count { position: absolute; top: 6px; right: 6px; display: flex; align-items: center; gap: 4px; border-radius: 8px; padding: 4px 6px; background: #170e21cc; font-size: .75rem; }
+.post-gallery { position: absolute; inset: 0; background: #120e19; }
+.post-gallery-track {
+  display: flex; position: absolute; inset: 0; overflow-x: auto; overflow-y: hidden;
+  overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scrollbar-width: none;
+}
+.post-gallery-track figure { flex: 0 0 100%; height: 100%; margin: 0; scroll-snap-align: start; scroll-snap-stop: always; }
+.post-gallery-track img { width: 100%; height: 100%; object-fit: contain; }
+.post-gallery-count, .post-gallery-dots, .post-gallery .icon { position: absolute; z-index: 2; background: #130d1bd9; }
+.post-gallery-count { top: 12px; right: 12px; border-radius: 20px; padding: 6px 11px; color: #fff; font-size: .82rem; pointer-events: none; }
+.post-gallery-dots { left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; gap: 5px; border-radius: 20px; padding: 6px; pointer-events: none; }
+.post-gallery-dots span { width: 5px; height: 5px; border-radius: 50%; background: #d8cce294; }
+.post-gallery-dots .active { background: var(--accent); }
+.post-gallery .icon { top: 50%; transform: translateY(-50%); }
+.post-gallery .icon:disabled { visibility: hidden; }
+.gallery-prev { left: 8px; }
+.gallery-next { right: 8px; }
+@media (pointer: coarse) { .post-gallery .icon { visibility: hidden; } }
+
 @media (max-width: 760px), (max-height: 540px) and (pointer: coarse) {
   dialog[data-panel="profile"]:not(:has(.arena)) {
     inset: 0;
