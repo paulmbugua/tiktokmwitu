@@ -30,6 +30,7 @@ import { LiveGiftsController } from './live-gifts';
 import { inviteSchema, LiveInvitesController, sweepInviteCodes } from './live-invites';
 import { PromoteController, promotionSchema, settlePromotions } from './promote';
 import { reconcileStreams, streamSchema } from './live-stream';
+import { livePricingSchema } from './live-pricing';
 
 @Controller()
 class HealthController {
@@ -60,7 +61,7 @@ async function start() {
   if (!process.env.DATABASE_URL && !process.env.PGHOST) throw new Error('Set DATABASE_URL or PGHOST before starting the API.');
   const publicMedia = join(mediaDir, 'public');
   await mkdir(publicMedia, { recursive: true });
-  await db.query(schema + googleSchema + liveSchema + giftSchema + inviteSchema + promotionSchema + streamSchema);
+  await db.query(schema + googleSchema + liveSchema + giftSchema + inviteSchema + promotionSchema + streamSchema + livePricingSchema);
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
   app.use(helmet());

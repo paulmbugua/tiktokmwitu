@@ -32,9 +32,11 @@ type Match = {
 };
 type Snapshot = {
   audienceDelivery?: 'starting' | 'ready';
+  audienceBudget?: { total_seconds: number; remaining_seconds: number };
   playback?: string | null;
   hostProfile?:{handle:string;following:boolean};
-  room: { id: string; chat_open: boolean; pinned_id: string | null; ended: boolean; guest_access: boolean };
+  room: { id: string; chat_open: boolean; pinned_id: string | null; ended: boolean; guest_access: boolean;
+    endsAt?: string | null; endedReason?: string | null };
   self: { role: 'host' | 'moderator' | 'viewer' | 'guest'; mutedUntil: string | null };
   match?: Match; stage?: StageState; messages: ChatLine[]; gifts?: GiftEvent[]; now: number;
 };
@@ -109,7 +111,12 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const streaming = audience && (!connected || (!mySeat?.on_stage && !battlePublisher));
   const playingStream = useRef(streaming);
   playingStream.current = streaming;
-  const active = !snapshot?.error && (connected || !!(audience && state && !state.room.ended && (!grant.guest || state.room.guest_access)));
+  const active = !snapshot?.error && !state?.room.ended && (connected || !!(audience && state && (!grant.guest || state.room.guest_access)));
+  const secondsLeft = state?.room.endsAt ? Math.max(0, Math.ceil((new Date(state.room.endsAt).getTime() - (clock || state.now)) / 1000)) : null;
+  const endedMessage = state?.room.endedReason === 'duration_limit' ? 'LIVE reached its 60-minute limit.'
+    : state?.room.endedReason === 'audience_limit' ? 'LIVE ended when the viewer-minute allowance ran out.'
+    : state?.room.endedReason === 'plan_expired' ? 'The host’s weekly LIVE plan ended.'
+    : 'Broadcast ended.';
   const stageSeatId = mySeat?.on_stage ? mySeat.id : null;
   stageSeatRef.current = stageSeatId;
   const isPublisher = grant.host || battlePublisher || !!stageSeatId;
@@ -534,7 +541,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
     <GiftEffects events={state?.gifts} now={state?.now} />
     <div className="arena-top">
       <span className={'arena-status' + (active && !state?.room.ended ? ' on-air' : '')} role="status">
-        {state?.room.ended ? 'Broadcast ended.' : grant.guest && state?.room.guest_access === false ? 'Guest watching is off.' : active ? 'LIVE' : status}
+        {state?.room.ended ? endedMessage : grant.guest && state?.room.guest_access === false ? 'Guest watching is off.' : active ? 'LIVE' : status}
       </span>
       <div className="arena-buttons">
         {grant.host&&connected&&!battle&&!seats.length&&<button className="arena-action" aria-label="LIVE challenge" title="LIVE challenge"
@@ -596,6 +603,13 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       {match?.status==='cancelled'&&!seats.length&&<p className="hint">Challenge {match.outcome==='guest_removed'?'ended':match.outcome}.</p>}
     </div>
     <div className="arena-foot" ref={footer}>
+      {grant.host && active && secondsLeft !== null && secondsLeft <= 300 && <p className="arena-notice">
+        LIVE ends in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}.
+      </p>}
+      {grant.host && active && state?.audienceBudget && state.audienceBudget.remaining_seconds <= state.audienceBudget.total_seconds / 5 &&
+        <button className="arena-notice" onClick={() => toggleDrawer('share')}>
+          {Math.floor(state.audienceBudget.remaining_seconds / 60).toLocaleString('en-KE')} viewer-minutes left · Add more
+        </button>}
       {!hideChat && <div className="arena-conversation">
         {pinned && <p className="pinned"><strong>Pinned · @{pinned.handle}</strong> {pinned.body}</p>}
         <LiveChatLog messages={state?.messages??[]} pinned={pinned?.id} viewerId={active?user?.id:undefined}

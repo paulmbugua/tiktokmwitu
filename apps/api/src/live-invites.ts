@@ -8,6 +8,7 @@ import { commerceTransaction, lockWallet, spendCoins } from './commerce';
 import { coinBalance } from './gift-store';
 import { db, parse, requireUser, uuid } from './infra';
 import { lockedRoom, requireOpen } from './live-store';
+import { activePlanSql, audienceBalance, livePlans, maxLiveMinutes, requireAudienceBalance, viewerMinutePack } from './live-pricing';
 
 export const inviteSchema = `
 CREATE TABLE IF NOT EXISTS live_invite_plans (
@@ -37,7 +38,6 @@ CREATE INDEX IF NOT EXISTS live_invite_expiration ON live_invite_passes(expires_
 
 type Plan = { id: string; coins: number; daily_limit: number; ends_at: Date };
 export type InvitePass = { code: string; room_id: string; claim_browser: string | null; claim_user: string | null; expires_at: Date };
-const activePlanSql = 'SELECT * FROM live_invite_plans WHERE user_id=$1 AND ends_at>now() ORDER BY ends_at DESC LIMIT 1';
 export const isAudienceCode = (code: string) => /^\d{6}$/.test(code);
 
 export function checkInvite(pass: InvitePass | undefined, browser: string, userId?: string) {
@@ -86,8 +86,32 @@ export class LiveInvitesController {
     const { rows } = plan ? await db.query<{ count: number }>(
       "SELECT count(*)::int FROM live_invite_passes WHERE plan_id=$1 AND created_day=(now() AT TIME ZONE 'Africa/Nairobi')::date", [plan.id])
       : { rows: [] };
-    return { plans: [{ coins: 1000, limit: 5 }, { coins: 2000, limit: 10 }], plan,
+    return { plans: livePlans, plan: plan ? { ...plan, audience: await audienceBalance(db, plan.id) } : undefined,
+      maxLiveMinutes, viewerMinutePack,
       used: rows[0]?.count ?? 0, balance: await coinBalance(user.id) };
+  }
+
+  @Post('audience-top-up')
+  @Throttle({ default: { limit: 8, ttl: 60000 } })
+  async topUp(@Req() req: Request, @Body() body: unknown) {
+    const user = await requireUser(req);
+    const { requestId, planId } = parse(z.object({ requestId: z.uuid(), planId: z.uuid() }), body);
+    return commerceTransaction(async client => {
+      await lockWallet(client, user.id);
+      const { rows: [prior] } = await client.query<{ plan_id: string }>(
+        'SELECT plan_id FROM live_viewer_packs WHERE user_id=$1 AND request_id=$2', [user.id, requestId]);
+      if (prior) {
+        if (prior.plan_id !== planId) throw new ConflictException('Start a new purchase for this plan.');
+        return { audience: await audienceBalance(client, planId) };
+      }
+      const plan = await client.query('SELECT id FROM live_invite_plans WHERE id=$1 AND user_id=$2 AND ends_at>clock_timestamp() FOR UPDATE',
+        [planId, user.id]);
+      if (!plan.rowCount) throw new ConflictException('Activate a weekly LIVE plan first.');
+      await spendCoins(client, user.id, viewerMinutePack.coins);
+      await client.query('INSERT INTO live_viewer_packs(user_id,plan_id,request_id,coins,viewer_seconds) VALUES($1,$2,$3,$4,$5)',
+        [user.id, planId, requestId, viewerMinutePack.coins, viewerMinutePack.viewerMinutes * 60]);
+      return { audience: await audienceBalance(client, planId) };
+    });
   }
 
   @Post('purchase')
@@ -125,6 +149,7 @@ export class LiveInvitesController {
         if (prior.room_id !== room.id) throw new ConflictException('Make a new invite for this LIVE.');
         return { code: prior.code, expiresAt: prior.expires_at };
       }
+      await requireAudienceBalance(client, plan.id);
       const { rows: [{ count }] } = await client.query<{ count: number }>(
         "SELECT count(*)::int FROM live_invite_passes WHERE plan_id=$1 AND created_day=(now() AT TIME ZONE 'Africa/Nairobi')::date", [plan.id]);
       if (count >= plan.daily_limit) throw new ConflictException('Today’s invite limit has been reached. It resets at midnight in Kenya.');
@@ -134,7 +159,11 @@ export class LiveInvitesController {
           INSERT INTO live_invite_passes(code,room_id,plan_id,request_id,expires_at)
           VALUES($1,$2,$3,$4,LEAST($5,now()+interval '24 hours'))
           ON CONFLICT(code) DO NOTHING RETURNING code,expires_at`, [code,room.id,plan.id,requestId,plan.ends_at]);
-        if(invite)return {code:invite.code,expiresAt:invite.expires_at};
+        if (invite) {
+          if (!room.invite_plan_id) await client.query(
+            'UPDATE live_rooms SET invite_plan_id=$2,meter_at=clock_timestamp() WHERE id=$1', [room.id, plan.id]);
+          return { code:invite.code, expiresAt:invite.expires_at };
+        }
       }
       throw new ServiceUnavailableException('Could not allocate a LIVE code. Try again.');
     });

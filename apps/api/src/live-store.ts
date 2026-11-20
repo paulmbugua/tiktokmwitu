@@ -114,6 +114,7 @@ export type LiveRoom = {
   id: string; host_id: string; online_at: Date | null; ended_at: Date | null; created_at: Date;
   chat_open: boolean; keywords: string[]; pinned_id: string | null; share_code: string; guest_access: boolean;
   spotlight_id: string | null; spotlight_fullscreen: boolean; stage_cards: number;
+  invite_plan_id: string | null; deadline_at: Date | null; end_reason: string | null;
 };
 
 export async function stageSnapshot(client: PoolClient | typeof db, room: LiveRoom, userId: string | null) {
@@ -187,7 +188,8 @@ export async function lockedRoom<T>(id: string, work: (client: PoolClient, room:
 }
 
 export function requireOpen(room: LiveRoom) {
-  if (!room.online_at || room.ended_at) throw new ConflictException('This broadcast is offline.');
+  if (!room.online_at || room.ended_at || (room.deadline_at && room.deadline_at <= new Date()))
+    throw new ConflictException('This broadcast is offline.');
 }
 
 export async function member(client: PoolClient | typeof db, room: LiveRoom, user: Person) {

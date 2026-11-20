@@ -12,6 +12,7 @@ import { recentGifts } from './gift-store';
 import { browserKey } from './commerce';
 import { checkInvite, claimInvite, isAudienceCode, normalizeInvite, type InvitePass } from './live-invites';
 import { enqueueStream, playback, streamEnabled } from './live-stream';
+import { activePlanSql, audienceBalance, maxLiveMinutes, meterLive, requireAudienceBalance } from './live-pricing';
 
 const { LIVEKIT_URL: url, LIVEKIT_API_KEY: key, LIVEKIT_API_SECRET: secret } = process.env;
 const internalUrl = process.env.LIVEKIT_INTERNAL_URL || url;
@@ -52,7 +53,8 @@ async function loadBroadcast(id: string) {
   ]);
   const [match] = matchResult.rows;
   return {
-    room: { id, ended: !!room.ended_at, guest_access: room.guest_access, chat_open: room.chat_open, pinned_id: room.pinned_id },
+    room: { id, ended: !!room.ended_at, endedReason: room.end_reason, endsAt: room.deadline_at,
+      guest_access: room.guest_access, chat_open: room.chat_open, pinned_id: room.pinned_id },
     playback: !room.ended_at && room.available ? playback(room.input_id) : null,
     stage, match: match ? { ...match, guests: await matchGuests(db, match.id) } : undefined,
     messages, gifts, now: Date.now(),
@@ -80,6 +82,29 @@ function guestBroadcast(shared: Awaited<ReturnType<typeof loadBroadcast>>) {
 }
 
 const guestFeeds = new Map<string, Set<Response>>();
+const guestFeedViewers = new WeakMap<Response, string>();
+const streamingViewers = new Map<string, Map<string, number>>();
+function streamingPresence(room: LiveRoom, viewer: string) {
+  if (!room.invite_plan_id || room.ended_at) return;
+  const viewers = streamingViewers.get(room.id) ?? new Map<string, number>();
+  viewers.set(viewer, Date.now() + 18000);
+  streamingViewers.set(room.id, viewers);
+}
+
+function addStreamingAudience(room: LiveRoom, stage: Set<string>, viewers: Set<string>) {
+  const now = Date.now();
+  const recent = streamingViewers.get(room.id);
+  for (const [viewer, expiresAt] of recent ?? []) {
+    if (expiresAt <= now) recent?.delete(viewer);
+    else if (!stage.has(viewer) && (room.guest_access || !viewer.startsWith(guestIdentityPrefix))) viewers.add(viewer);
+  }
+  if (room.guest_access) {
+    for (const feed of guestFeeds.get(room.id) ?? []) {
+      const viewer = guestFeedViewers.get(feed);
+      if (viewer && !feed.destroyed) viewers.add(viewer);
+    }
+  }
+}
 export const streamGuestCount = (id: string) => guestFeeds.get(id)?.size ?? 0;
 const lastGuestEvent = new Map<string, { revision: string; sentAt: number }>();
 let pushingGuests = false;
@@ -181,21 +206,29 @@ async function joinAudience(room: LiveRoom, user: Person) {
 }
 
 export async function finishRoom(id: string, outcome: string, moderator?: Person) {
-  await lockedRoom(id, async (client, room) => {
-    if (room.ended_at) return;
+  const ended = await lockedRoom(id, async (client, room) => {
+    if (room.ended_at) return true;
+    if (room.invite_plan_id && room.online_at) {
+      const budget = await meterLive(client, id, room.invite_plan_id, 0);
+      if (outcome === 'audience_limit' && budget !== 'audience_limit' && budget !== 'plan_expired') return false;
+    }
     await settle(client, room);
-    await endMatch(client, room, outcome, moderator ? undefined : room.host_id);
+    await endMatch(client, room, outcome, !moderator && outcome === 'host_left' ? room.host_id : undefined);
     await client.query('DELETE FROM live_stage_seats WHERE room_id=$1', [id]);
     await client.query('DELETE FROM live_stage_requests WHERE room_id=$1', [id]);
-    await client.query('UPDATE live_rooms SET ended_at=now(),spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1', [id]);
+    await client.query('UPDATE live_rooms SET ended_at=now(),end_reason=$2,spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1', [id, outcome]);
+    await client.query("UPDATE live_streams SET available=false,checked_at='-infinity' WHERE room_id=$1", [id]);
     if (moderator) {
       await client.query('DELETE FROM live_reports WHERE room_id=$1', [id]);
       await client.query(`INSERT INTO live_audit(room_id,actor_id,action,details)
         VALUES ($1,$2,'platformEnd','{}')`, [id, moderator.id]);
     }
+    return true;
   });
-  if (service) await service.deleteRoom(roomName(id)).catch(error => console.error('LIVE disconnect will retry', id, error));
+  if (!ended) return;
+  streamingViewers.delete(id);
   broadcastCache.delete(id);
+  if (service) await service.deleteRoom(roomName(id)).catch(error => console.error('LIVE disconnect will retry', id, error));
 }
 
 let ticking = false;
@@ -208,6 +241,8 @@ export async function reconcileLive() {
   try {
     const { rows } = await db.query<LiveRoom>('SELECT * FROM live_rooms WHERE ended_at IS NULL');
     const rooms = new Set(rows.map(row => row.id));
+    const due = rows.filter(room => room.deadline_at && room.deadline_at <= new Date());
+    await Promise.allSettled(due.map(room => finishRoom(room.id, 'duration_limit')));
     for (const id of hostMissing.keys()) if (!rooms.has(id)) hostMissing.delete(id);
     for (const id of guestMissing.keys()) if (!rooms.has(id)) guestMissing.delete(id);
     const remote = new Map((await service.listRooms()).map(room => [room.name, room]));
@@ -218,6 +253,17 @@ export async function reconcileLive() {
       const changed = await lockedRoom(room.id, async (client, fresh) => {
         if (fresh.ended_at) return false;
         const participants = remote.has(name) ? await service.listParticipants(name) : [];
+        if (fresh.online_at && fresh.invite_plan_id) {
+          const stage = new Set(participants.filter(person =>
+            person.identity === fresh.host_id || person.permission?.canPublish || person.permission?.hidden).map(person => person.identity));
+          const { rows: [stream] } = await client.query<{ available: boolean }>(
+            'SELECT available FROM live_streams WHERE room_id=$1', [fresh.id]);
+          const viewers = new Set(participants.filter(person => !stage.has(person.identity) &&
+            (fresh.guest_access || !person.identity.startsWith(guestIdentityPrefix))).map(person => person.identity));
+          if (stream?.available) addStreamingAudience(fresh, stage, viewers);
+          const limit = await meterLive(client, fresh.id, fresh.invite_plan_id, viewers.size);
+          if (limit) return limit;
+        }
         const connected = participants.map(person => person.identity);
         if (connected.includes(fresh.host_id)) hostMissing.delete(fresh.id);
         else if (!hostMissing.has(fresh.id)) hostMissing.set(fresh.id, Date.now());
@@ -269,7 +315,7 @@ export async function reconcileLive() {
         }));
         return updated;
       });
-      if (changed === 'host_left') await finishRoom(room.id, changed);
+      if (typeof changed === 'string') await finishRoom(room.id, changed);
       else if (changed) notifyRoom(room.id);
     }));
   } catch (error) {
@@ -309,15 +355,17 @@ export class LiveController {
   async start(@Req() req: Request) {
     const user = await requireUser(req);
     liveService();
+    const { rows: [plan] } = await db.query<{id: string}>(activePlanSql, [user.id]);
+    await requireAudienceBalance(db, plan?.id ?? null);
     const { rows: [{ eligible, room }] } = await db.query<{ eligible: boolean; room: LiveRoom | null }>(`
       WITH status AS (${hostingEligibility}), eligibility AS (
         SELECT followers >= $2 OR "hasActivePlan" AS eligible FROM status
       ), started AS (
-        INSERT INTO live_rooms(host_id) SELECT $1 FROM eligibility WHERE eligible
+        INSERT INTO live_rooms(host_id,invite_plan_id) SELECT $1,$3 FROM eligibility WHERE eligible
         ON CONFLICT(host_id) WHERE ended_at IS NULL DO NOTHING RETURNING *
       )
       SELECT eligible, (SELECT row_to_json(started) FROM started) AS room FROM eligibility`,
-      [user.id, minimumFollowers]);
+      [user.id, minimumFollowers, plan?.id ?? null]);
     if (!eligible) throw new ForbiddenException(`You need ${minimumFollowers} followers or an active weekly LIVE invite plan to start a broadcast.`);
     if (!room) throw new ConflictException('You already have an active LIVE. Reopen it from the LIVE list.');
     return grant(room, user);
@@ -412,6 +460,7 @@ export class LiveController {
     }
     if (await streamRoom(room.id)) {
       const shared = await broadcastSnapshot(room.id);
+      if (room.guest_access && shared.playback) streamingPresence(room, guestIdentityPrefix + browser);
       return guestBroadcast({ ...shared, room: { ...shared.room, guest_access: room.guest_access && shared.room.guest_access } });
     }
     return lockedRoom(room.id, async (client, fresh) => {
@@ -424,7 +473,8 @@ export class LiveController {
         [fresh.id]);
       return {
         self: { role: 'guest', mutedUntil: null },
-        room: { id: fresh.id, ended: !!fresh.ended_at, guest_access: fresh.guest_access, chat_open: false,
+        room: { id: fresh.id, ended: !!fresh.ended_at, endedReason: fresh.end_reason, endsAt: fresh.deadline_at,
+          guest_access: fresh.guest_access, chat_open: false,
           pinned_id: fresh.guest_access ? fresh.pinned_id : null },
         match: fresh.guest_access && match ? {...match, guests:await matchGuests(client,match.id)} : undefined,
         stage: fresh.guest_access ? await stageSnapshot(client, fresh, null) : undefined,
@@ -453,6 +503,7 @@ export class LiveController {
     const responses = guestFeeds.get(room.id) ?? new Set<Response>();
     guestFeeds.set(room.id, responses);
     responses.add(res);
+    guestFeedViewers.set(res, guestIdentityPrefix + browser);
     res.once('close', () => {
       responses.delete(res);
       if (!responses.size) {
@@ -504,11 +555,15 @@ export class LiveController {
     const user = await requireUser(req);
     const id = uuid(raw);
     await waitForCamera(id, user.id);
-    await lockedRoom(id, async (client, room) => {
+    const metered = await lockedRoom(id, async (client, room) => {
       if (room.host_id !== user.id || room.ended_at) throw new ForbiddenException();
-      await client.query('UPDATE live_rooms SET online_at=COALESCE(online_at,now()) WHERE id=$1', [id]);
+      await requireAudienceBalance(client, room.invite_plan_id);
+      await client.query(`UPDATE live_rooms SET online_at=COALESCE(online_at,now()),
+        deadline_at=COALESCE(deadline_at,COALESCE(online_at,now())+make_interval(mins=>$2))
+        WHERE id=$1`, [id, maxLiveMinutes]);
+      return !!room.invite_plan_id;
     });
-    await enqueueStream(id);
+    if (metered) await enqueueStream(id);
     return { ok: true };
   }
 
@@ -538,6 +593,7 @@ export class LiveController {
         if (!room.ended_at && !(await db.query('SELECT 1 FROM live_members WHERE room_id=$1 AND user_id=$2', [id, user.id])).rowCount) {
           throw new ForbiddenException('Join this LIVE to continue.');
         }
+        if (shared.playback) streamingPresence(room, user.id);
         await db.query(`UPDATE live_members SET joined_at=now()
           WHERE room_id=$1 AND user_id=$2 AND NOT banned AND joined_at<now()-interval '40 seconds'`, [id, user.id]);
         const [profile, stage, vote] = await Promise.all([
@@ -562,8 +618,10 @@ export class LiveController {
         LEFT JOIN live_votes v ON v.match_id=m.id AND v.user_id=$2 WHERE m.room_id=$1
         ORDER BY m.updated_at DESC,m.id DESC LIMIT 1`, [room.id, user.id]);
       return {
-        self, hostProfile, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
-        audienceDelivery: self.role === 'host' && streamEnabled
+        self, hostProfile, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at,
+          endedReason: room.end_reason, endsAt: room.deadline_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
+        audienceBudget: self.role === 'host' && room.invite_plan_id ? await audienceBalance(client, room.invite_plan_id) : undefined,
+        audienceDelivery: self.role === 'host' && streamEnabled && room.invite_plan_id
           ? (await client.query('SELECT 1 FROM live_streams WHERE room_id=$1 AND available', [id])).rowCount ? 'ready' : 'starting'
           : undefined,
         match:match?{...match,guests:await matchGuests(client,match.id)}:undefined,
