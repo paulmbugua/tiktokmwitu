@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { setMaxListeners } from 'node:events';
 import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -42,14 +41,13 @@ const rtc = createServer((req, res) => {
 let api;
 let created = false;
 const samples = new Map();
-const streams = new AbortController();
-// The test intentionally cancels all open guest feeds together.
-setMaxListeners(listeners + 16, streams.signal);
+const feedsPerController = 1000;
+const streamGroups = Array.from({ length: Math.ceil(listeners / feedsPerController) }, () => new AbortController());
 
 async function guestEvents(cookie, index) {
   const ip = '10.2.' + (1 + Math.floor(index / 254) % 254) + '.' + (1 + index % 254);
   const response = await fetch(base + '/api' + invitation + '/events', {
-    headers: { 'cf-connecting-ip': ip, cookie }, signal: streams.signal,
+    headers: { 'cf-connecting-ip': ip, cookie }, signal: streamGroups[Math.floor(index / feedsPerController)].signal,
   });
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type'), /text\/event-stream/);
@@ -227,7 +225,7 @@ try {
   console.log(JSON.stringify({ viewers: total, authenticated: accounts.length, chats: accounts.length, concurrency: clients,
     joinSeconds: +joinSeconds.toFixed(2), pollSeconds: +pollSeconds.toFixed(2) }));
 } finally {
-  streams.abort();
+  for (const group of streamGroups) group.abort();
   if (api && api.exitCode === null) {
     const stopped = new Promise(resolve => api.once('exit', resolve));
     api.kill();
