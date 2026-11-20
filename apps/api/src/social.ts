@@ -1,5 +1,5 @@
 
-import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Put, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { z } from 'zod';
@@ -17,6 +17,20 @@ async function person(handle: string) {
 
 @Controller()
 export class SocialController {
+  @Get('creator-search')
+  @Throttle({ default: { limit: 90, ttl: 60000 } })
+  async creatorSearch(@Req() req: Request, @Query('q') raw?: string) {
+    const viewer = await requireUser(req);
+    const query = parse(z.string().max(24).regex(/^[a-z0-9_]*$/i), raw ?? '').toLowerCase();
+    const { rows } = await db.query<Person>(`
+      SELECT u.id,u.handle,u.display_name
+      FROM users u LEFT JOIN follows f ON f.creator_id=u.id AND f.follower_id=$2
+      WHERE ($1='' AND f.follower_id IS NOT NULL) OR ($1<>'' AND starts_with(u.handle,$1))
+      ORDER BY (u.handle=$1) DESC,(f.follower_id IS NOT NULL) DESC,u.handle
+      LIMIT 7`, [query, viewer.id]);
+    return rows;
+  }
+
   @Get('creators/:handle')
   async profile(@Req() req: Request, @Param('handle') handle: string) {
     const creator = await person(handle);

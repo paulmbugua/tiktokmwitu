@@ -106,6 +106,26 @@ dialog[data-panel="profile"] > .dialog-inner > header {
 .creator-message { padding: 16px; color: var(--muted); text-align: center; }
 .creator-more { display: flex; margin: 14px auto; }
 
+.caption-editor { display: grid; gap: 7px; }
+.caption-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.caption-tools button { display: inline-flex; align-items: center; gap: 5px; }
+.caption-tools > span, .caption-editor p, .caption-matches small { color: var(--muted); font-size: .81rem; }
+.caption-matches { border: 1px solid #9983ad58; border-radius: 12px; background: #20172a; overflow: hidden; }
+.caption-matches [role="listbox"] { max-height: 188px; overflow-y: auto; }
+.caption-matches button {
+  width: 100%; min-height: 44px; padding: 6px 10px;
+  display: flex; align-items: center; gap: 9px; text-align: left;
+}
+.caption-matches button:hover, .caption-matches button[aria-selected="true"] { background: #41314f; }
+.caption-matches button .avatar { width: 32px; height: 32px; flex: none; }
+.caption-matches strong, .caption-matches small { display: block; overflow-wrap: anywhere; }
+.caption-editor p { margin: 0; }
+.caption-matches p { padding: 9px 10px; }
+.clip-info p .caption-handle {
+  display: inline; padding: 0; border: 0; border-radius: 3px;
+  color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: .15em;
+}
+
 @media (max-width: 760px), (max-height: 540px) and (pointer: coarse) {
   dialog[data-panel="profile"]:not(:has(.arena)) {
     inset: 0;

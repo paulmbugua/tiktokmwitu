@@ -17,6 +17,7 @@ import Promote, { promotionAction, promotionEvent, usePlacementView, type Placem
 import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Video } from './client';
 import CreatorProfile from './creator-profile';
 import { uploadVideo, type UploadJob } from './profile-upload';
+import CaptionMentions, { CaptionText } from './caption-mentions';
 
 type Tab = 'For You' | 'Following' | 'Discover';
 type WalletPanel = { kind: 'wallet'; purchaseId?: string; liveCode?: string; liveRoom?:string };
@@ -81,9 +82,10 @@ function SavedVideos({ show }: { show: (id: string) => void }) {
   </>;
 }
 
-function Clip({ video, root, muted, onMute, children, profile, manage, promotion, goalAction }: {
+function Clip({ video, root, muted, onMute, children, profile, mention, manage, promotion, goalAction }: {
   video: Video; root: HTMLElement | null; muted: boolean; onMute: () => void; children: ReactNode; profile: () => void; manage: ReactNode;
   promotion?:Placement; goalAction:()=>void;
+  mention: (handle: string) => void;
 }) {
   const section = useRef<HTMLElement>(null);
   const player = useRef<HTMLVideoElement>(null);
@@ -132,7 +134,7 @@ function Clip({ video, root, muted, onMute, children, profile, manage, promotion
           <button onClick={profile}><Avatar name={video.display_name} /><span>{video.display_name} <small>@{video.handle}</small></span></button>
           {manage}
         </div>
-        {video.caption && <p>{video.caption}</p>}
+        {video.caption && <p><CaptionText caption={video.caption} open={mention} /></p>}
         {promotion&&<div ref={setAdRef} className="commerce-heading promoted-cta">
           <small>Sponsored</small>
           {promotion.destination ? <a className="secondary" href={promotion.destination} target="_blank" rel="noopener noreferrer sponsored"
@@ -565,6 +567,7 @@ export default function Home() {
         }}>
           {clips.map(video => <Clip key={video.id} video={video} root={root} muted={muted} onMute={() => setMuted(!muted)}
             profile={() => open({ kind: 'profile', handle: video.handle })}
+            mention={handle => open({ kind: 'profile', handle })}
             promotion={video.id===paid?.id?placement??undefined:undefined}
             goalAction={()=>open(placement?.goal==='engagement'?{kind:'comments',video}:{kind:'profile',handle:video.handle})}
             manage={<div className="clip-utilities">
@@ -672,7 +675,7 @@ export default function Home() {
           {fileName && <span className="upload-file">{fileName}</span>}
           <small>MP4, MOV or WebM · 48 MB · First 60 seconds</small>
         </label>
-        <label>Caption<textarea name="caption" maxLength={500} required placeholder="What should people know?" /></label>
+        <CaptionMentions />
         <button className="primary">Publish video</button>
       </form>}
       {panel.kind === 'comments' && <>
