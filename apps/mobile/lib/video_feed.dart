@@ -396,7 +396,8 @@ class _VideoCardState extends State<_VideoCard> {
     final initialized = video?.value.isInitialized ?? false;
     final wide = initialized && video!.value.aspectRatio > 1;
     final safe = MediaQuery.viewPaddingOf(context);
-    final footer = _feedNavHeight + safe.bottom;
+    // The extended Scaffold body reports the full navigation height here.
+    final footer = MediaQuery.paddingOf(context).bottom;
     final compact = MediaQuery.sizeOf(context).height < 420;
     final controlSize = compact
         ? const ButtonStyle(
@@ -531,7 +532,7 @@ class _VideoCardState extends State<_VideoCard> {
           ),
           Positioned(
             right: safe.right + 8,
-            bottom: footer + 8,
+            bottom: footer + 16,
             width: compact ? 84 : 48,
             child: IconButtonTheme(
               data: const IconButtonThemeData(
