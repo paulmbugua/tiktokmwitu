@@ -182,6 +182,7 @@ try {
     assert.equal(token.get('bcdn_token'), 'HS256-' + expected);
   });
   const pollSeconds = (performance.now() - pollStart) / 1000;
+  console.log(total + ' invite joins and state requests succeeded.');
   const listenersToOpen = Math.min(listeners, total - accounts.length);
   if (listenersToOpen) {
     const readers = [];
@@ -205,7 +206,6 @@ try {
       console.log('Chat pushed to ' + result.length + ' open guest feeds in ' + Math.round(Math.max(...result)) + 'ms');
     } finally {
       clearTimeout(timeout);
-      streams.abort();
     }
   }
   await call('/live/' + room + '/stage-connection', { cookie: guestCookies[0], method: 'POST', statuses: [403] });
