@@ -1,0 +1,42 @@
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	route {
+		@unauthorized not header X-Mwitu-Origin-Key {$BUNNY_ORIGIN_KEY}
+		respond @unauthorized 403
+
+		@playlist {
+			method GET HEAD
+			path_regexp ^/mwitu-[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}/[a-zA-Z0-9_-]+[.]m3u8$
+		}
+		handle @playlist {
+			reverse_proxy bunny-media:8888 {
+				header_up -X-Mwitu-Origin-Key
+				header_down Cache-Control "no-store"
+			}
+		}
+
+		@segment {
+			method GET HEAD
+			path_regexp ^/mwitu-[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}/[a-zA-Z0-9_-]+[.]ts$
+		}
+		handle @segment {
+			reverse_proxy bunny-media:8888 {
+				header_up -X-Mwitu-Origin-Key
+				@media response status 200 206
+				handle_response @media {
+					header Cache-Control "public, max-age=60"
+					copy_response_headers {
+						exclude Cache-Control
+					}
+					copy_response
+				}
+			}
+		}
+
+		respond 404
+	}
+}

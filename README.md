@@ -76,6 +76,18 @@ For the self-hosted VPS setup, use `compose.livekit.yaml` with `compose.yaml` an
 
 Sign in as the host, select Live, allow camera and microphone, then sign in from another browser profile to watch and send a chat message.
 
+### Prepare the Bunny CDN LIVE origin
+
+The Bunny origin runs separately from the production API and LiveKit. MediaMTX accepts an authenticated RTMP feed on the private Docker network and produces 2-second HLS segments. Caddy serves signed-origin requests on the VPS loopback, with fresh playlists and cacheable segments. The private file `secrets/bunny-origin.env` requires independent random hex values for `BUNNY_RTMP_PASSWORD` and `BUNNY_ORIGIN_KEY`.
+
+```sh
+docker compose --env-file secrets/bunny-origin.env -f compose.bunny-origin.yaml up -d
+```
+
+Use an unused room UUID for test publishers. The RTMP address from the private media network is `rtmp://bunny-media:1935/mwitu-ROOM-UUID?user=mwitu&pass=PASSWORD`. The local playlist is `http://127.0.0.1:18888/mwitu-ROOM-UUID/index.m3u8` and requires the `X-Mwitu-Origin-Key` header.
+
+For delivery, expose this gateway through a dedicated HTTPS origin hostname and use it as the Bunny Volume Pull Zone origin. Send the private origin header from Bunny, bypass caching for playlists, and cache successful segment responses. Keep the origin credentials separate from Bunny player token signing. Connecting LiveKit Egress and switching audience playback are separate rollout steps.
+
 ### Deliver large LIVE audiences through Cloudflare Stream
 
 The same invite URL opens the audience player. LiveKit serves the host and invited performers. Its compositor pushes a portrait rendition of the stage to one Cloudflare Stream live input per broadcast. Stream delivers signed adaptive HLS to the audience. Camera effects already present in published tracks are included. The audience sees the composited grid with a playback delay. Chat, gifting, moderation and seat requests still use Mwitu. Guests can read chat, and signed-in viewers can participate.

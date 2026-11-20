@@ -1,0 +1,26 @@
+name: tiktokmwitu-bunny
+services:
+  bunny-media:
+    image: bluenviron/mediamtx:1.21.4
+    restart: unless-stopped
+    environment:
+      MTX_AUTHINTERNALUSERS_0_PASS: ${BUNNY_RTMP_PASSWORD:?Set the private RTMP publisher password}
+    volumes:
+      - ./deploy/mediamtx.bunny.yaml:/mediamtx.yml:ro
+    networks: [bunny_media]
+    mem_limit: 512m
+  bunny-origin:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    depends_on: [bunny-media]
+    environment:
+      BUNNY_ORIGIN_KEY: ${BUNNY_ORIGIN_KEY:?Set the private HLS origin key}
+    volumes:
+      - ./deploy/Caddyfile.bunny-origin:/etc/caddy/Caddyfile:ro
+    networks: [bunny_media]
+    ports:
+      - "127.0.0.1:18888:8080"
+    mem_limit: 256m
+
+networks:
+  bunny_media:

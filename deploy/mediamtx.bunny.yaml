@@ -1,0 +1,28 @@
+logLevel: warn
+rtsp: false
+webrtc: false
+srt: false
+moq: false
+rtmp: true
+rtmpAddress: :1935
+hls: true
+hlsAddress: :8888
+hlsVariant: mpegts
+hlsAlwaysRemux: true
+hlsSegmentCount: 7
+hlsSegmentDuration: 2s
+hlsSegmentMaxSize: 8M
+authInternalUsers:
+  - user: mwitu
+    pass:
+    permissions:
+      - action: publish
+        path: '~^mwitu-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
+  - user: any
+    permissions:
+      - action: read
+        path: '~^mwitu-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
+paths:
+  '~^mwitu-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$':
+    source: publisher
+    overridePublisher: false
