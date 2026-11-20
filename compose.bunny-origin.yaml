@@ -24,3 +24,6 @@ services:
 
 networks:
   bunny_media:
+    ipam:
+      config:
+        - subnet: ${MWITU_BUNNY_SUBNET:-10.253.75.0/28}
