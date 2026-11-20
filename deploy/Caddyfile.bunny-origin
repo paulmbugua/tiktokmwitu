@@ -15,6 +15,7 @@
 		handle @playlist {
 			reverse_proxy bunny-media:8888 {
 				header_up -X-Mwitu-Origin-Key
+				header_up Authorization "Bearer {$BUNNY_MTX_CDN_SECRET}"
 				header_down Cache-Control "no-store"
 			}
 		}
@@ -26,6 +27,7 @@
 		handle @segment {
 			reverse_proxy bunny-media:8888 {
 				header_up -X-Mwitu-Origin-Key
+				header_up Authorization "Bearer {$BUNNY_MTX_CDN_SECRET}"
 				@media status 200 206
 				handle_response @media {
 					header Cache-Control "public, max-age=60"

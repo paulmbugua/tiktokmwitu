@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     environment:
       MTX_AUTHINTERNALUSERS_0_PASS: ${BUNNY_RTMP_PASSWORD:?Set the private RTMP publisher password}
+      MTX_HLSCDNSECRET: ${BUNNY_MTX_CDN_SECRET:?Set the internal MediaMTX CDN secret}
     volumes:
       - ./deploy/mediamtx.bunny.yaml:/mediamtx.yml:ro
     networks: [bunny_media]
@@ -16,6 +17,7 @@ services:
     depends_on: [bunny-media]
     environment:
       BUNNY_ORIGIN_KEY: ${BUNNY_ORIGIN_KEY:?Set the private HLS origin key}
+      BUNNY_MTX_CDN_SECRET: ${BUNNY_MTX_CDN_SECRET:?Set the internal MediaMTX CDN secret}
     volumes:
       - ./deploy/Caddyfile.bunny-origin:/etc/caddy/Caddyfile:ro
     networks: [bunny_media]

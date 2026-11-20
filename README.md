@@ -78,7 +78,7 @@ Sign in as the host, select Live, allow camera and microphone, then sign in from
 
 ### Prepare the Bunny CDN LIVE origin
 
-The Bunny origin runs separately from the production API and LiveKit. MediaMTX accepts an authenticated RTMP feed on the private Docker network and produces 2-second HLS segments. Caddy serves signed-origin requests on the VPS loopback, with fresh playlists and cacheable segments. The private file `secrets/bunny-origin.env` requires independent random hex values for `BUNNY_RTMP_PASSWORD` and `BUNNY_ORIGIN_KEY`.
+The Bunny origin runs separately from the production API and LiveKit. MediaMTX accepts an authenticated RTMP feed on the private Docker network and produces 2-second HLS segments. Caddy authenticates origin requests and uses MediaMTX's CDN mode for shared playlists and cacheable segments. The private file `secrets/bunny-origin.env` requires independent random hex values for `BUNNY_RTMP_PASSWORD`, `BUNNY_ORIGIN_KEY`, and `BUNNY_MTX_CDN_SECRET`.
 
 ```sh
 docker compose --env-file secrets/bunny-origin.env -f compose.bunny-origin.yaml up -d
