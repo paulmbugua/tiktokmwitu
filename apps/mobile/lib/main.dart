@@ -8,8 +8,9 @@ import 'mwitu_links.dart';
 import 'video_feed.dart';
 import 'workspace.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   final links = AppLinks();
   runApp(MwituApp(links: links));
 }

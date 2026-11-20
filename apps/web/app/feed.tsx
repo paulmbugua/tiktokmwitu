@@ -26,7 +26,10 @@ type AccountDestination = 'upload' | 'inbox' | 'account';
 type GoogleSignup = { display_name: string };
 type GoogleSignIn = { web: boolean; android: boolean };
 type GoogleBridge = () => Promise<{ idToken?: string; cancelled?: boolean }>;
-type GoogleWindow = Window & { mwituAndroidGoogle?: GoogleBridge; mwituOpenFeed?: () => boolean };
+type GoogleWindow = Window & {
+  mwituAndroidGoogle?: GoogleBridge; mwituOpenFeed?: () => boolean;
+  mwituProfileEdge?: (active: boolean) => Promise<number | null>;
+};
 type Panel =
   | { kind: 'upload' | 'inbox' | 'account' | 'saved' | 'invites' }
   | { kind: 'auth'; liveCode?: string; wallet?: WalletPanel; destination?: AccountDestination }
@@ -45,7 +48,29 @@ function Avatar({ name }: { name: string }) {
 
 function Dialog({ title, kind, close, children }: { title: string; kind: Panel['kind']; close: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => { ref.current?.showModal(); }, []);
+  useEffect(() => {
+    const dialog = ref.current;
+    dialog?.showModal();
+    if (!dialog || kind !== 'profile') return;
+    const app = window as GoogleWindow;
+    let closed = false;
+    const sync = () => {
+      void app.mwituProfileEdge?.(true).then(inset => {
+        if (!closed && typeof inset === 'number' && Number.isFinite(inset) && inset >= 0 && inset <= 160) {
+          dialog.style.setProperty('--mwitu-native-top', inset + 'px');
+        }
+      }).catch(() => undefined);
+    };
+    sync();
+    window.addEventListener('flutterInAppWebViewPlatformReady', sync);
+    window.addEventListener('orientationchange', sync);
+    return () => {
+      closed = true;
+      window.removeEventListener('flutterInAppWebViewPlatformReady', sync);
+      window.removeEventListener('orientationchange', sync);
+      void app.mwituProfileEdge?.(false).catch(() => undefined);
+    };
+  }, [kind]);
   return <dialog ref={ref} data-panel={kind} aria-label={title} onCancel={event => { event.preventDefault(); close(); }} onClick={event => {
     if (event.target === ref.current) close();
   }}>

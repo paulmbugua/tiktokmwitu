@@ -1,7 +1,7 @@
 'use client';
 
-import { Bookmark, Camera, Clapperboard, Grid3X3, Heart, ImagePlus, Images, Menu, Pencil, Plus, RotateCcw, X } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
+import { Bookmark, Clapperboard, Grid3X3, Heart, Images, Menu, Pencil, Pin, Plus, RotateCcw, X } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, mediaUrl, send, useData, type Feed, type Person, type Video } from './client';
 import type { UploadJob } from './profile-upload';
 
@@ -15,6 +15,7 @@ const poster = (id: string) => mediaUrl(id).replace(/\.mp4$/, '.jpg');
 
 function ProfilePhoto({ kind, id, changed }: { kind: 'avatar' | 'cover'; id?: string | null; changed: () => void }) {
   const label = kind === 'avatar' ? 'Profile photo' : 'Cover photo';
+  const picker = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -38,23 +39,23 @@ function ProfilePhoto({ kind, id, changed }: { kind: 'avatar' | 'cover'; id?: st
     finally { setBusy(false); }
   }
 
-  return <div className="creator-photo-field">
-    <div className="creator-photo-preview" data-kind={kind}>
-      {id ? <img src={poster(id)} crossOrigin="anonymous" alt="" /> : <ImagePlus size={21} aria-hidden="true" />}
-    </div>
-    <label className="creator-photo-picker">
-      {label}
-      <input type="file" aria-label={'Choose ' + label.toLowerCase()} disabled={busy}
+  return <div className="creator-photo-control" data-kind={kind}>
+    <input ref={picker} type="file" hidden aria-label={'Choose ' + label.toLowerCase()} disabled={busy}
         accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={event => {
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = '';
           if (file) void update(file);
         }} />
-    </label>
-    {id && <button type="button" className="link" disabled={busy} onClick={() => void update()}>Remove {label.toLowerCase()}</button>}
-    {busy && <small role="status">Saving {label.toLowerCase()}…</small>}
-    {saved && <small role="status">{label} updated.</small>}
-    {error && <small className="error" role="alert">{error}</small>}
+    <button type="button" className="creator-photo-hit" aria-label={'Change ' + label.toLowerCase()}
+      title={'Change ' + label.toLowerCase()} disabled={busy} onClick={() => picker.current?.click()}>
+      <span className="creator-photo-pin"><Pin size={16} aria-hidden="true" /></span>
+    </button>
+    {id && <button type="button" className="creator-photo-remove" aria-label={'Remove ' + label.toLowerCase()}
+      title={'Remove ' + label.toLowerCase()} disabled={busy}
+      onClick={() => { if (window.confirm('Remove your ' + label.toLowerCase() + '?')) void update(); }}><X size={14} /></button>}
+    {(busy || saved || error) && <small className="creator-photo-status" role={error ? 'alert' : 'status'}>
+      {error || (busy ? 'Saving ' + label.toLowerCase() + '…' : label + ' updated.')}
+    </small>}
   </div>;
 }
 
@@ -164,14 +165,15 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
   return <div className="creator-page">
     {identity && <div className="creator-cover" data-custom={!!profile?.cover_id}>
       {profile?.cover_id && <img src={poster(profile.cover_id)} alt="" crossOrigin="anonymous" />}
-      {mine && profile && !editing && <button className="icon" type="button" aria-label="Edit profile photos" onClick={() => { setError(''); setEditing(true); }}>
-        <Camera size={19} />
-      </button>}
+      {mine && profile && <ProfilePhoto kind="cover" id={profile.cover_id} changed={() => setPhotoRevision(value => value + 1)} />}
     </div>}
     {identity && <div className="creator-intro">
       <div className="creator-identity">
-        <div className="creator-avatar" aria-hidden="true">
-          {profile?.avatar_id ? <img src={poster(profile.avatar_id)} alt="" crossOrigin="anonymous" /> : identity.display_name.slice(0, 1).toUpperCase()}
+        <div className="creator-avatar-wrap">
+          <div className="creator-avatar" aria-hidden="true">
+            {profile?.avatar_id ? <img src={poster(profile.avatar_id)} alt="" crossOrigin="anonymous" /> : identity.display_name.slice(0, 1).toUpperCase()}
+          </div>
+          {mine && profile && <ProfilePhoto kind="avatar" id={profile.avatar_id} changed={() => setPhotoRevision(value => value + 1)} />}
         </div>
         <div><h3>{identity.display_name}</h3><p>@{identity.handle}</p></div>
         {mine && <button className="icon" aria-label="Account settings" onClick={account}><Menu size={21} /></button>}
@@ -193,10 +195,6 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
         </>}
       </div>
       {editing && <form onSubmit={save}>
-        <div className="creator-photo-fields">
-          <ProfilePhoto kind="avatar" id={profile?.avatar_id} changed={() => setPhotoRevision(value => value + 1)} />
-          <ProfilePhoto kind="cover" id={profile?.cover_id} changed={() => setPhotoRevision(value => value + 1)} />
-        </div>
         <label>Display name<input name="display_name" defaultValue={identity.display_name} maxLength={48} required /></label>
         <label>Bio<textarea name="bio" defaultValue={profile?.bio} maxLength={160} /></label>
         <label>Website<input name="website" type="url" defaultValue={profile?.website} maxLength={300} placeholder="https://" /></label>
