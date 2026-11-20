@@ -2,6 +2,7 @@ name: tiktokmwitu-bunny
 services:
   bunny-media:
     image: bluenviron/mediamtx:1.21.4
+    user: "10077:10077"
     restart: unless-stopped
     environment:
       MTX_AUTHINTERNALUSERS_0_PASS: ${BUNNY_RTMP_PASSWORD:?Set the private RTMP publisher password}

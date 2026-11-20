@@ -26,7 +26,7 @@
 		handle @segment {
 			reverse_proxy bunny-media:8888 {
 				header_up -X-Mwitu-Origin-Key
-				@media response status 200 206
+				@media status 200 206
 				handle_response @media {
 					header Cache-Control "public, max-age=60"
 					copy_response_headers {
