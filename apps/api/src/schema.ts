@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
   expires_at timestamptz NOT NULL
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bio varchar(160) NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS website varchar(300) NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS session_expiry ON sessions(expires_at);
 CREATE TABLE IF NOT EXISTS videos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -22,6 +24,8 @@ CREATE TABLE IF NOT EXISTS videos (
 );
 CREATE INDEX IF NOT EXISTS videos_feed ON videos(created_at DESC, id DESC);
 ALTER TABLE videos ALTER COLUMN county SET DEFAULT '';
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS upload_request_id uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS videos_upload_request ON videos(user_id,upload_request_id);
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS media_storage text NOT NULL DEFAULT 'local'
   CHECK (media_storage IN ('local','r2'));
 CREATE TABLE IF NOT EXISTS video_media_cleanup (

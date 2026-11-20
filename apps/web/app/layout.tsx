@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next';
 import './style.css';
 import './surfaces.css';
 import './immersive-feed.css';
+import './creator-profile.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://tiktokmwitu.co.ke'),

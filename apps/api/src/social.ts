@@ -25,9 +25,26 @@ export class SocialController {
       SELECT
         (SELECT count(*)::int FROM follows WHERE creator_id=$1) AS followers,
         (SELECT count(*)::int FROM follows WHERE follower_id=$1) AS following_count,
-        EXISTS(SELECT 1 FROM follows WHERE creator_id=$1 AND follower_id=$2) AS following`,
+        (SELECT count(*)::int FROM likes l JOIN videos v ON v.id=l.video_id WHERE v.user_id=$1) AS likes,
+        EXISTS(SELECT 1 FROM follows WHERE creator_id=$1 AND follower_id=$2) AS following,
+        bio,website FROM users WHERE id=$1`,
       [creator.id, viewer?.id ?? null]);
     return { ...creator, ...stats };
+  }
+
+  @Put('account/profile')
+  async editProfile(@Req() req: Request, @Body() body: unknown) {
+    const user = await requireUser(req);
+    const profile = parse(z.object({
+      display_name: cleanText(48),
+      bio: z.union([z.literal(''), cleanText(160)]),
+      website: z.union([z.literal(''), z.url({ protocol: /^https?$/ }).max(300)]),
+    }), body);
+    const { rows: [updated] } = await db.query<Person>(`
+      UPDATE users SET display_name=$2,bio=$3,website=$4 WHERE id=$1 RETURNING id,handle,display_name`,
+      [user.id, profile.display_name, profile.bio, profile.website]);
+    publishFeed();
+    return updated;
   }
 
   @Put('creators/:handle/follow')

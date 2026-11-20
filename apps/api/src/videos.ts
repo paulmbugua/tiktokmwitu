@@ -14,7 +14,7 @@ import {
 import { removeVideo, saveVideo } from './media';
 import type { MediaStorage } from './media-storage';
 
-const videoFields = z.object({ caption: cleanText(500) });
+const videoFields = z.object({ caption: cleanText(500), requestId: z.uuid().optional(), owner: z.uuid().optional() });
 const textBody = z.object({ body: cleanText(500) });
 const enabledBody = z.object({ enabled: z.boolean() });
 const clientCursor = z.object({ at: z.iso.datetime(), id: z.uuid() });
@@ -62,6 +62,7 @@ export class VideosController {
       following: z.enum(['true', 'false']).optional(),
       q: searchSchema.optional(),
       creator: handleSchema.optional(),
+      liked: z.literal('true').optional(),
       at: clientCursor.shape.at.optional(),
       after: clientCursor.shape.id.optional(),
     }), query);
@@ -73,8 +74,9 @@ export class VideosController {
       AND ($3::text IS NULL OR strpos(lower(v.caption || ' ' || u.handle || ' ' || u.display_name),lower($3)) > 0)
       AND ($4::text IS NULL OR u.handle=$4)
       AND ($5::timestamptz IS NULL OR (v.created_at,v.id)<($5,$6::uuid))
+      AND (NOT $7::boolean OR EXISTS (SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=$1))
       ORDER BY v.created_at DESC,v.id DESC LIMIT 13`,
-      [user?.id ?? null, input.following === 'true', input.q || null, input.creator ?? null, input.at ?? null, input.after ?? null]);
+      [user?.id ?? null, input.following === 'true', input.q || null, input.creator ?? null, input.at ?? null, input.after ?? null, input.liked === 'true']);
     return feedPage(rows);
   }
 
@@ -104,17 +106,32 @@ export class VideosController {
   @Post('videos')
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @UseGuards(SessionGuard)
-  @UseInterceptors(FileInterceptor('video', { limits: { fileSize: uploadLimit, files: 1, fields: 2, fieldSize: 2048 } }))
+  @UseInterceptors(FileInterceptor('video', { limits: { fileSize: uploadLimit, files: 1, fields: 3, fieldSize: 2048 } }))
   async upload(
     @Req() req: Request, @Body() body: unknown, @UploadedFile() file?: { buffer: Buffer },
   ) {
     const user = await requireUser(req);
-    const { caption } = parse(videoFields, body);
+    const { caption, requestId, owner } = parse(videoFields, body);
+    if (owner && owner !== user.id) throw new BadRequestException('Sign in to the account that started this upload.');
     if (!file?.buffer.length) throw new BadRequestException('Choose a video.');
+    const prior = async () => (await db.query<{ id: string }>(
+      'SELECT id FROM videos WHERE user_id=$1 AND upload_request_id=$2', [user.id, requestId])).rows[0];
+    if (requestId) {
+      const published = await prior();
+      if (published) return published;
+    }
     const { id: mediaId, storage } = await saveVideo(file.buffer);
     try {
-      await db.query('INSERT INTO videos(id,user_id,caption,media_storage) VALUES ($1,$2,$3,$4)',
-        [mediaId, user.id, caption, storage]);
+      const result = await db.query(`
+        INSERT INTO videos(id,user_id,caption,media_storage,upload_request_id) VALUES ($1,$2,$3,$4,$5)
+        ON CONFLICT (user_id,upload_request_id) DO NOTHING RETURNING id`,
+        [mediaId, user.id, caption, storage, requestId ?? null]);
+      if (!result.rowCount) {
+        const published = await prior();
+        if (!published) throw new NotFoundException('This upload is no longer available.');
+        await removeVideo(mediaId, storage).catch(() => undefined);
+        return published;
+      }
     } catch (error) {
       await removeVideo(mediaId, storage).catch(() => undefined);
       throw error;

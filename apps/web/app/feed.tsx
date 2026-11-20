@@ -6,7 +6,7 @@ import {
   Download, Flag, Flame, Heart, House, Inbox as InboxIcon, MapPin, MessageCircle, Plus, Radio, Search, Ticket,
   Send, Share2, Trash2, UploadCloud, UserRound, UsersRound, Volume2, VolumeX, X,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { io } from 'socket.io-client';
 import dynamic from 'next/dynamic';
 import SignupNameFields from './signup-name-fields';
@@ -14,7 +14,9 @@ import InstallApp from './install-app';
 import GiftWallet from './gift-wallet';
 import LiveInvitePlans from './live-invite-plans';
 import Promote, { promotionAction, promotionEvent, usePlacementView, type Placement } from './promote';
-import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Profile, type Video } from './client';
+import { api, mediaUrl, send, useData, type Comment, type Cursor, type Feed, type Inbox, type Message, type Person, type Video } from './client';
+import CreatorProfile from './creator-profile';
+import { uploadVideo, type UploadJob } from './profile-upload';
 
 type Tab = 'For You' | 'Following' | 'Discover';
 type WalletPanel = { kind: 'wallet'; purchaseId?: string; liveCode?: string; liveRoom?:string };
@@ -163,6 +165,11 @@ export default function Home() {
   const [google, setGoogle] = useState<'web' | 'android' | null>(null);
   const [nativeApp, setNativeApp] = useState(false);
   const [fileName, setFileName] = useState('');
+  const [uploads, setUploads] = useState<UploadJob[]>([]);
+  const uploadTail = useRef(Promise.resolve());
+  const activeUploads = useRef(new Set<string>());
+  const uploadOwner = useRef(user?.id);
+  uploadOwner.current = user?.id;
   const [mutation, setMutation] = useState(false);
   const paneKind = useRef<string | undefined>(undefined);
   paneKind.current = panel?.kind;
@@ -261,8 +268,6 @@ export default function Home() {
   const promotedVideo=useData<Video>(placement?.videoId?'/videos/'+placement.videoId:null,feedRev);
   const linked = useData<Video>(shared ? '/videos/' + shared : null, feedRev);
   const comments = useData<Comment[]>(panel?.kind === 'comments' ? '/videos/' + panel.video.id + '/comments' : null, feedRev);
-  const creator = useData<Profile>(panel?.kind === 'profile' ? '/creators/' + panel.handle : null, feedRev);
-  const creatorVideos = useData<Feed>(panel?.kind === 'profile' ? '/videos?creator=' + panel.handle : null, feedRev);
   const inbox = useData<Inbox[]>(panel?.kind === 'inbox' && user ? '/inbox' : null, inboxRev);
   const messages = useData<Message[]>(panel?.kind === 'chat' && user ? '/inbox/' + panel.handle : null, inboxRev);
   const organic = shared
@@ -281,7 +286,39 @@ export default function Home() {
   }
 
   function protectedPanel(next: Panel) {
-    open(user ? next : { kind: 'auth' });
+    const destination = next.kind === 'upload' || next.kind === 'inbox' || next.kind === 'account' ? next.kind : undefined;
+    open(user ? next : { kind: 'auth', destination });
+  }
+
+  function myProfile() {
+    open(user ? { kind: 'profile', handle: user.handle } : { kind: 'auth', destination: 'account' });
+  }
+
+  const forgetPublished = useCallback((ids: string[]) => {
+    const confirmed = new Set(ids);
+    setUploads(current => current.some(job => job.videoId && confirmed.has(job.videoId))
+      ? current.filter(job => !job.videoId || !confirmed.has(job.videoId)) : current);
+  }, []);
+
+  function queueUpload(job: UploadJob) {
+    if (uploadOwner.current !== job.owner || activeUploads.current.has(job.id)) return;
+    activeUploads.current.add(job.id);
+    const queued: UploadJob = { ...job, stage: 'queued', percent: 0, error: undefined };
+    setUploads(current => current.some(item => item.id === job.id)
+      ? current.map(item => item.id === job.id ? queued : item)
+      : [queued, ...current]);
+    const update = (values: Partial<UploadJob>) => setUploads(current =>
+      current.map(item => item.id === job.id ? { ...item, ...values } : item));
+    uploadTail.current = uploadTail.current.then(async () => {
+      try {
+        if (uploadOwner.current !== job.owner) throw new Error('Sign in again to retry this upload.');
+        update({ stage: 'uploading' });
+        const videoId = await uploadVideo(queued, (stage, percent) => update({ stage, percent }));
+        update({ stage: 'published', videoId, file: undefined });
+        refresh();
+      } catch (error) { update({ stage: 'failed', error: (error as Error).message }); }
+      finally { activeUploads.current.delete(job.id); }
+    });
   }
 
   function clearLink() {
@@ -374,6 +411,18 @@ export default function Home() {
     if (!panel || pending) return;
     const form = event.currentTarget;
     const data = new FormData(form);
+    if (panel.kind === 'upload') {
+      if (!user) { open({ kind: 'auth', destination: 'upload' }); return; }
+      const file = data.get('video');
+      const caption = String(data.get('caption') ?? '').trim();
+      if (!(file instanceof File) || !file.size || !caption) {
+        setDialogError('Choose a video and enter a caption.');
+        return;
+      }
+      queueUpload({ id: crypto.randomUUID(), owner: user.id, caption, file, stage: 'queued', percent: 0 });
+      open({ kind: 'profile', handle: user.handle });
+      return;
+    }
     setDialogError('');
     setPending(true);
     try {
@@ -392,13 +441,6 @@ export default function Home() {
           setUser(person);
           setExtra(null);
           setPanel(panel.next ?? null);
-          refresh();
-          break;
-        }
-        case 'upload': {
-          const result = await api<{ id: string }>('/videos', { method: 'POST', body: data });
-          showVideo(result.id);
-          setFeedback('Video published.');
           refresh();
           break;
         }
@@ -461,7 +503,7 @@ export default function Home() {
   const titles = {
     auth: mode === 'register' ? 'Join Tiktok mwitu' : 'Welcome back',
     googleSignup: 'Choose your handle',
-    upload: 'Post a video', comments: 'Comments', profile: 'Creator profile',
+    upload: 'Post a video', comments: 'Comments', profile: panel?.kind === 'profile' && panel.handle === user?.handle ? 'Your profile' : 'Creator profile',
     inbox: 'Inbox', chat: panel && 'handle' in panel ? '@' + panel.handle : 'Chat',
     report: 'Report video', account: 'Your account', live: 'Live broadcasts', saved: 'Saved videos', wallet: 'Coin wallet', invites:'LIVE invite plans',promote:'Promote',
   };
@@ -488,7 +530,7 @@ export default function Home() {
         <a className="catalog-link" href="/videos">Browse Kenyan videos</a>
         <a className="catalog-link" href="/download">Get the Android app</a>
       <button className="primary post" aria-label="Post a video" onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={22} /> <span>Post a video</span></button>
-      <button className="account" aria-label={user ? 'Your account' : 'Log in / Sign up'} onClick={() => open({ kind: user ? 'account' : 'auth' })}>
+      <button className="account" aria-label={user ? 'Your profile' : 'Log in / Sign up'} onClick={myProfile}>
         {user ? <Avatar name={user.display_name} /> : <UserRound size={19} />} <span>{user ? '@' + user.handle : 'Log in / Sign up'}</span>
       </button>
     </aside>
@@ -504,7 +546,7 @@ export default function Home() {
         </div>
         <div className="top-tools">
           <InstallApp interrupted={!!panel} />
-          <button className="top-account icon" onClick={() => open({ kind: user ? 'account' : 'auth' })} aria-label="Account"><UserRound size={19} /></button>
+          <button className="top-account icon" onClick={myProfile} aria-label="Profile"><UserRound size={19} /></button>
         </div>
       </header>
       {tab === 'Discover' && !shared && <form className="search" onSubmit={event => {
@@ -580,10 +622,11 @@ export default function Home() {
         </div>
       </div>
       <nav className="mobile-nav" aria-label="Mobile menu">
-        {navigation.map(({ name, icon: Icon }) => <button key={name} className={tab === name && !shared ? 'selected' : ''} onClick={() => choose(name)}><Icon size={20} />{name}</button>)}
+        {navigation.slice(0, 2).map(({ name, icon: Icon }) => <button key={name} className={tab === name && !shared ? 'selected' : ''} onClick={() => choose(name)}><Icon size={20} />{name}</button>)}
         <button className="mobile-post" onClick={() => protectedPanel({ kind: 'upload' })}><Plus size={23} />Post</button>
         <button onClick={() => protectedPanel({ kind: 'inbox' })}><InboxIcon size={20} />Inbox{unread && <i className="unread" />}</button>
         <button onClick={() => open({ kind: 'live' })}><Radio size={20} />Live</button>
+        <button onClick={myProfile}><UserRound size={20} />Profile</button>
       </nav>
     </main>
 
@@ -630,7 +673,7 @@ export default function Home() {
           <small>MP4, MOV or WebM · 48 MB · First 60 seconds</small>
         </label>
         <label>Caption<textarea name="caption" maxLength={500} required placeholder="What should people know?" /></label>
-        <button className="secondary" disabled={pending}>{pending ? 'Uploading and processing…' : 'Publish video'}</button>
+        <button className="primary">Publish video</button>
       </form>}
       {panel.kind === 'comments' && <>
         <div className="list">
@@ -641,23 +684,13 @@ export default function Home() {
           <button className="primary" disabled={pending} aria-label="Send comment"><Send size={18} /></button></form>
           : <button className="primary" onClick={() => open({ kind: 'auth' })}>Log in to comment</button>}
       </>}
-      {panel.kind === 'profile' && <>
-        {creator?.data && <div className="profile">
-          <Avatar name={creator.data.display_name} /><h3>{creator.data.display_name}</h3><p>@{creator.data.handle}</p>
-          <div className="stats"><span>{creator.data.followers} followers</span><span>{creator.data.following_count} following</span></div>
-          {user?.id !== creator.data.id && <div className="profile-actions">
-            <button className="primary" onClick={() => change('/creators/' + panel.handle + '/follow', 'PUT', { enabled: !creator.data?.following })}>
-              {creator.data.following ? 'Unfollow' : 'Follow'}
-            </button>
-            <button className="secondary" onClick={() => protectedPanel({ kind: 'chat', handle: panel.handle })}>Message</button>
-          </div>}
-        </div>}
-        <div className="list">
-          {creatorVideos?.data?.items.map(video => <button className="row item" key={video.id} onClick={() => showVideo(video.id)}>
-            <Clapperboard size={21} /><div>{video.caption}</div><ChevronRight size={18} /></button>)}
-          <p className="hint">{creator?.error ?? creatorVideos?.error ?? (creatorVideos?.data?.items.length === 0 ? 'No videos yet.' : '')}</p>
-        </div>
-      </>}
+      {panel.kind === 'profile' && <CreatorProfile key={panel.handle} handle={panel.handle} user={user} revision={feedRev}
+        jobs={uploads.filter(job => job.owner === user?.id)} show={showVideo} retry={queueUpload} forgetPublished={forgetPublished}
+        dismiss={id => setUploads(current => current.filter(job => job.id !== id))}
+        post={() => protectedPanel({ kind: 'upload' })} account={() => protectedPanel({ kind: 'account' })}
+        follow={enabled => void change('/creators/' + panel.handle + '/follow', 'PUT', { enabled })}
+        message={() => protectedPanel({ kind: 'chat', handle: panel.handle })}
+        updated={person => { setUser(person); refresh(); }} />}
       {panel.kind === 'inbox' && <div className="list">
         {inbox?.data?.map(entry => <button className="row item" key={entry.handle} onClick={() => open({ kind: 'chat', handle: entry.handle })}>
           <Avatar name={entry.display_name} /><div><strong>{entry.display_name}</strong><p>{entry.body}</p></div><ChevronRight size={18} />
