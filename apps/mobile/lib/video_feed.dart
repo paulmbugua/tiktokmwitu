@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -8,6 +9,8 @@ import 'package:video_player/video_player.dart';
 
 import 'android_updates.dart';
 import 'mwitu_links.dart';
+
+const _feedNavHeight = 58.0;
 
 class _Clip {
   const _Clip(this.id, this.caption, this.handle);
@@ -110,106 +113,137 @@ class _VideoFeedState extends State<VideoFeed> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      bottom: false,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 6, 10),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(11),
-                  child: Image.asset('assets/mwitu.png', width: 35, height: 35),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text.rich(
-                      TextSpan(
-                        text: 'TikTok ',
-                        children: [
-                          TextSpan(
-                            text: 'Mwitu',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.primary,
+    extendBody: true,
+    body: Stack(
+      fit: StackFit.expand,
+      children: [
+        _clips.isEmpty
+            ? _empty()
+            : PageView.builder(
+                scrollDirection: Axis.vertical,
+                controller: _pages,
+                itemCount: _clips.length + (_cursor != null ? 1 : 0),
+                onPageChanged: (index) {
+                  setState(() => _position = index);
+                  if (!_error && index >= _clips.length - 2) {
+                    unawaited(_load());
+                  }
+                },
+                itemBuilder: (_, index) {
+                  if (index >= _clips.length) {
+                    return Center(
+                      child: _error
+                          ? FilledButton(
+                              onPressed: () => _load(),
+                              child: const Text('Retry'),
+                            )
+                          : _loading
+                          ? const CircularProgressIndicator()
+                          : TextButton(
+                              onPressed: () => _load(),
+                              child: const Text('Load more'),
+                            ),
+                    );
+                  }
+                  final clip = _clips[index];
+                  return _VideoCard(
+                    key: ValueKey(clip.id),
+                    clip: clip,
+                    active: widget.active && _foreground && index == _position,
+                    muted: _muted,
+                    toggleMute: () => setState(() => _muted = !_muted),
+                    open: widget.open,
+                  );
+                },
+              ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xd9090710), Colors.transparent],
+              ),
+            ),
+            child: SafeArea(
+              bottom: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 6, 10),
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(11),
+                          child: Image.asset(
+                            'assets/mwitu.png',
+                            width: 35,
+                            height: 35,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text.rich(
+                              TextSpan(
+                                text: 'TikTok ',
+                                children: [
+                                  TextSpan(
+                                    text: 'Mwitu',
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              maxLines: 1,
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontFamily: 'Caveat Brush'),
                             ),
                           ),
-                        ],
-                      ),
-                      maxLines: 1,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(fontFamily: 'Caveat Brush'),
+                        ),
+                        IconButton(
+                          tooltip: 'Following',
+                          onPressed: () =>
+                              widget.open(workspaceUri(tab: 'following')),
+                          icon: const Icon(Icons.people_outline_rounded),
+                        ),
+                        IconButton(
+                          tooltip: 'Discover',
+                          onPressed: () =>
+                              widget.open(workspaceUri(tab: 'videos')),
+                          icon: const Icon(Icons.search_rounded),
+                        ),
+                        IconButton(
+                          tooltip: 'Refresh feed',
+                          onPressed: _loading ? null : () => _load(reset: true),
+                          icon: const Icon(Icons.refresh_rounded),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                IconButton(
-                  tooltip: 'Following',
-                  onPressed: () => widget.open(workspaceUri(tab: 'following')),
-                  icon: const Icon(Icons.people_outline_rounded),
-                ),
-                IconButton(
-                  tooltip: 'Discover',
-                  onPressed: () => widget.open(workspaceUri(tab: 'videos')),
-                  icon: const Icon(Icons.search_rounded),
-                ),
-                IconButton(
-                  tooltip: 'Refresh feed',
-                  onPressed: _loading ? null : () => _load(reset: true),
-                  icon: const Icon(Icons.refresh_rounded),
-                ),
-              ],
+
+                  AndroidUpdateBanner(active: widget.active),
+                ],
+              ),
             ),
           ),
-          AndroidUpdateBanner(active: widget.active),
-          Expanded(
-            child: _clips.isEmpty
-                ? _empty()
-                : PageView.builder(
-                    scrollDirection: Axis.vertical,
-                    controller: _pages,
-                    itemCount: _clips.length + (_cursor != null ? 1 : 0),
-                    onPageChanged: (index) {
-                      setState(() => _position = index);
-                      if (!_error && index >= _clips.length - 2) {
-                        unawaited(_load());
-                      }
-                    },
-                    itemBuilder: (_, index) {
-                      if (index >= _clips.length) {
-                        return Center(
-                          child: _error
-                              ? FilledButton(
-                                  onPressed: () => _load(),
-                                  child: const Text('Retry'),
-                                )
-                              : _loading
-                              ? const CircularProgressIndicator()
-                              : TextButton(
-                                  onPressed: () => _load(),
-                                  child: const Text('Load more'),
-                                ),
-                        );
-                      }
-                      final clip = _clips[index];
-                      return _VideoCard(
-                        key: ValueKey(clip.id),
-                        clip: clip,
-                        active:
-                            widget.active && _foreground && index == _position,
-                        muted: _muted,
-                        toggleMute: () => setState(() => _muted = !_muted),
-                        open: widget.open,
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
+        ),
+      ],
     ),
     bottomNavigationBar: NavigationBar(
+      height: _feedNavHeight,
+      backgroundColor: const Color(0x330a0810),
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
       selectedIndex: 0,
       onDestinationSelected: (index) async {
         const tabs = ['', 'live', 'post', 'inbox', 'account'];
@@ -347,154 +381,184 @@ class _VideoCardState extends State<_VideoCard> {
   Widget build(BuildContext context) {
     final video = _video;
     final initialized = video?.value.isInitialized ?? false;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(6, 0, 6, 5),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: ColoredBox(
-          color: const Color(0xff211829),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (initialized)
-                FittedBox(
-                  fit: video!.value.aspectRatio > 1
-                      ? BoxFit.contain
-                      : BoxFit.cover,
-                  child: SizedBox(
-                    width: video.value.size.width,
-                    height: video.value.size.height,
-                    child: VideoPlayer(video),
+    final wide = initialized && video!.value.aspectRatio > 1;
+    final safe = MediaQuery.viewPaddingOf(context);
+    final footer = _feedNavHeight + safe.bottom;
+    final compact = MediaQuery.sizeOf(context).height < 420;
+    final controlSize = compact
+        ? const ButtonStyle(
+            fixedSize: WidgetStatePropertyAll(Size.square(40)),
+            minimumSize: WidgetStatePropertyAll(Size.square(40)),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          )
+        : null;
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (!initialized || wide)
+            ImageFiltered(
+              enabled: wide,
+              imageFilter: ImageFilter.blur(
+                sigmaX: 22,
+                sigmaY: 22,
+                tileMode: TileMode.clamp,
+              ),
+              child: Image.network(
+                widget.clip.thumbnail.toString(),
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
+            ),
+          if (initialized)
+            FittedBox(
+              fit: wide ? BoxFit.contain : BoxFit.cover,
+              child: SizedBox(
+                width: video!.value.size.width,
+                height: video.value.size.height,
+                child: VideoPlayer(video),
+              ),
+            ),
+          if (initialized)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  setState(() => _paused = !_paused);
+                  unawaited(_paused ? video!.pause() : video!.play());
+                },
+                child: _paused
+                    ? const Icon(Icons.play_circle_fill_rounded, size: 62)
+                    : null,
+              ),
+            ),
+          if (_failed)
+            Center(
+              child: FilledButton.tonal(
+                onPressed: () =>
+                    widget.open(workspaceUri(video: widget.clip.id)),
+                child: const Text('Open video'),
+              ),
+            ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: footer + 122,
+            child: const IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Color(0xcf0a0710)],
                   ),
-                )
-              else
-                Image.network(
-                  widget.clip.thumbnail.toString(),
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
                 ),
-              if (initialized)
-                Positioned.fill(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      setState(() => _paused = !_paused);
-                      unawaited(_paused ? video!.pause() : video!.play());
-                    },
-                    child: _paused
-                        ? const Icon(Icons.play_circle_fill_rounded, size: 62)
-                        : null,
+              ),
+            ),
+          ),
+          Positioned(
+            left: safe.left + 14,
+            right: safe.right + (compact ? 94 : 64),
+            bottom: footer + 12,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '@${widget.clip.handle}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    shadows: [Shadow(blurRadius: 4)],
                   ),
                 ),
-              if (_failed)
-                Center(
-                  child: FilledButton.tonal(
+                if (widget.clip.caption.isNotEmpty)
+                  Text(
+                    widget.clip.caption,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      shadows: [Shadow(blurRadius: 4)],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Positioned(
+            right: safe.right + 8,
+            bottom: footer + 8,
+            width: compact ? 84 : 48,
+            child: IconButtonTheme(
+              data: const IconButtonThemeData(
+                style: ButtonStyle(
+                  foregroundColor: WidgetStatePropertyAll(Colors.white),
+                  backgroundColor: WidgetStatePropertyAll(Color(0xb81b1425)),
+                ),
+              ),
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                spacing: compact ? 4 : 0,
+                runSpacing: 4,
+                children: [
+                  IconButton.filledTonal(
+                    style: controlSize,
+                    tooltip: widget.muted ? 'Turn sound on' : 'Mute',
+                    onPressed: widget.toggleMute,
+                    icon: Icon(
+                      widget.muted
+                          ? Icons.volume_off_rounded
+                          : Icons.volume_up_rounded,
+                    ),
+                  ),
+                  IconButton.filledTonal(
+                    style: controlSize,
+                    tooltip: 'Comments',
+                    onPressed: () => widget.open(
+                      workspaceUri(video: widget.clip.id, action: 'comments'),
+                    ),
+                    icon: const Icon(Icons.chat_bubble_outline_rounded),
+                  ),
+                  IconButton.filledTonal(
+                    style: controlSize,
+                    tooltip: 'Open reactions, follow and save',
                     onPressed: () =>
                         widget.open(workspaceUri(video: widget.clip.id)),
-                    child: const Text('Open video'),
+                    icon: const Icon(Icons.favorite_border_rounded),
                   ),
-                ),
-              const Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: 170,
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Colors.transparent, Color(0xee100c17)],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 16,
-                right: 66,
-                bottom: 16,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '@${widget.clip.handle}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
-                      ),
-                    ),
-                    if (widget.clip.caption.isNotEmpty)
-                      Text(
-                        widget.clip.caption,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                  ],
-                ),
-              ),
-              Positioned(
-                right: 8,
-                bottom: 12,
-                child: Column(
-                  children: [
-                    IconButton.filledTonal(
-                      tooltip: widget.muted ? 'Turn sound on' : 'Mute',
-                      onPressed: widget.toggleMute,
-                      icon: Icon(
-                        widget.muted
-                            ? Icons.volume_off_rounded
-                            : Icons.volume_up_rounded,
-                      ),
-                    ),
-                    IconButton.filledTonal(
-                      tooltip: 'Comments',
-                      onPressed: () => widget.open(
-                        workspaceUri(video: widget.clip.id, action: 'comments'),
-                      ),
-                      icon: const Icon(Icons.chat_bubble_outline_rounded),
-                    ),
-                    IconButton.filledTonal(
-                      tooltip: 'Open reactions, follow and save',
-                      onPressed: () =>
-                          widget.open(workspaceUri(video: widget.clip.id)),
-                      icon: const Icon(Icons.favorite_border_rounded),
-                    ),
-                    Builder(
-                      builder: (context) => IconButton.filledTonal(
-                        tooltip: 'Share',
-                        onPressed: () async {
-                          final box = context.findRenderObject() as RenderBox?;
-                          try {
-                            await SharePlus.instance.share(
-                              ShareParams(
-                                uri: widget.clip.link,
-                                sharePositionOrigin: box == null
-                                    ? null
-                                    : box.localToGlobal(Offset.zero) & box.size,
+                  Builder(
+                    builder: (context) => IconButton.filledTonal(
+                      style: controlSize,
+                      tooltip: 'Share',
+                      onPressed: () async {
+                        final box = context.findRenderObject() as RenderBox?;
+                        try {
+                          await SharePlus.instance.share(
+                            ShareParams(
+                              uri: widget.clip.link,
+                              sharePositionOrigin: box == null
+                                  ? null
+                                  : box.localToGlobal(Offset.zero) & box.size,
+                            ),
+                          );
+                        } catch (_) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Couldn’t open sharing.'),
                               ),
                             );
-                          } catch (_) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Couldn’t open sharing.'),
-                                ),
-                              );
-                            }
                           }
-                        },
-                        icon: const Icon(Icons.share_rounded),
-                      ),
+                        }
+                      },
+                      icon: const Icon(Icons.share_rounded),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

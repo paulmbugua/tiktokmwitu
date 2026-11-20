@@ -6,7 +6,7 @@ import {
   Download, Flag, Flame, Heart, House, Inbox as InboxIcon, MapPin, MessageCircle, Plus, Radio, Search, Ticket,
   Send, Share2, Trash2, UploadCloud, UserRound, UsersRound, Volume2, VolumeX, X,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { io } from 'socket.io-client';
 import dynamic from 'next/dynamic';
 import SignupNameFields from './signup-name-fields';
@@ -87,7 +87,9 @@ function Clip({ video, root, muted, onMute, children, profile, manage, promotion
   const player = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [wide, setWide] = useState(false);
   const [adRef,setAdRef]=useState<HTMLElement|null>(null);
+  const source = mediaUrl(video.id);
   usePlacementView(adRef,promotion);
   useEffect(() => {
     const element = section.current;
@@ -102,8 +104,14 @@ function Clip({ video, root, muted, onMute, children, profile, manage, promotion
   }, [root]);
   return <article className="clip" ref={section} data-clip={video.id}>
     <div className="clip-frame">
-      <div className="stage">
-        <video ref={player} src={mediaUrl(video.id)} loop muted={muted} playsInline preload="none"
+      <div className={wide ? 'stage stage-wide' : 'stage'} style={wide ? {
+        '--clip-backdrop': `url("${source.replace(/\.mp4$/, '.jpg')}")`,
+      } as CSSProperties : undefined}>
+        <video ref={player} src={source} loop muted={muted} playsInline preload="none"
+          onResize={event => {
+            const { videoWidth, videoHeight } = event.currentTarget;
+            if (videoHeight) setWide(videoWidth > videoHeight);
+          }}
           onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => setFailed(true)} />
         <button className="play-area" aria-label={playing ? 'Pause video' : 'Play video'} onClick={() => {
           const media = player.current;
@@ -485,7 +493,7 @@ export default function Home() {
       </button>
     </aside>
 
-    <main className="workspace">
+    <main className={clips.length ? 'workspace workspace-video' : 'workspace'}>
       <header className="top">
         <button className="mobile-brand" onClick={() => choose('For You')} aria-label="Home">
           <span className="brand-icon"><img src="/icons/mwitu-192.png" alt="" width="34" height="34" /></span>
