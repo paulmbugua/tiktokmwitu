@@ -17,6 +17,8 @@
 			reverse_proxy bunny-media:8888 {
 				header_up -X-Mwitu-Origin-Key
 				header_up Authorization "Bearer {$BUNNY_MTX_CDN_SECRET}"
+				header_down Access-Control-Allow-Origin "*"
+				header_down -Access-Control-Allow-Credentials
 				header_down Cache-Control "no-store"
 			}
 		}
@@ -34,6 +36,8 @@
 			reverse_proxy bunny-media:8888 {
 				header_up -X-Mwitu-Origin-Key
 				header_up Authorization "Bearer {$BUNNY_MTX_CDN_SECRET}"
+				header_down Access-Control-Allow-Origin "*"
+				header_down -Access-Control-Allow-Credentials
 			}
 		}
 
