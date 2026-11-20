@@ -84,9 +84,25 @@ The Bunny origin runs separately from the production API and LiveKit. MediaMTX a
 docker compose --env-file secrets/bunny-origin.env -f compose.bunny-origin.yaml up -d
 ```
 
-Use an unused room UUID for test publishers. The RTMP address from the private media network is `rtmp://bunny-media:1935/mwitu-ROOM-UUID?user=mwitu&pass=PASSWORD`. The local playlist is `http://127.0.0.1:18888/mwitu-ROOM-UUID/index.m3u8` and requires the `X-Mwitu-Origin-Key` header.
+Use an unused room UUID for test publishers. The RTMP address from the private media network is `rtmp://bunny-media:1935/live/mwitu-ROOM-UUID?user=mwitu&pass=PASSWORD`. The local playlist is `http://127.0.0.1:18888/mwitu-ROOM-UUID/index.m3u8` and requires the `X-Mwitu-Origin-Key` header.
 
-For delivery, add the DNS-only `live-origin.tiktokmwitu.co.ke` record pointing at the VPS. Include `compose.bunny-https.yaml` in the origin deployment to join the VPS ingress network, and install the site from `deploy/Caddyfile.bunny-site` on the shared HTTPS ingress. Use this HTTPS hostname as the Bunny Volume Pull Zone origin. Send the private origin header from Bunny, bypass caching for playlists, and cache successful segment responses. Keep the origin credentials separate from Bunny player token signing. Connecting LiveKit Egress and switching audience playback are separate rollout steps.
+For delivery, add the DNS-only `live-origin.tiktokmwitu.co.ke` record pointing at the VPS. Include `compose.bunny-https.yaml` in the origin deployment to join the VPS ingress network, and install the site from `deploy/Caddyfile.bunny-site` on the shared HTTPS ingress. Use this HTTPS hostname as the Bunny Volume Pull Zone origin. Set the Pull Zone origin request header `X-Mwitu-Origin-Key` to `BUNNY_ORIGIN_KEY` for both `m3u8` and `ts`. Keep playlists uncached and cache successful segment responses.
+
+### Deliver LIVE audiences through Bunny
+
+Enable Token Authentication on the Pull Zone. Save its URL Token Authentication Key as `BUNNY_VIEWER_TOKEN_KEY` in the private VPS file `secrets/bunny-viewer.env`. Keep this key separate from the origin header and RTMP publisher credentials.
+
+Use the Redis and Egress configuration from the Cloudflare setup below. During a window with no active broadcasts, start the stack with the Bunny overlay:
+
+```sh
+docker compose --env-file .env --env-file secrets/bunny-origin.env --env-file secrets/bunny-viewer.env \
+  -f compose.yaml -f compose.tunnel.yaml -f compose.livekit.yaml -f compose.stream.yaml \
+  -f compose.bunny-egress.yaml up -d --build db livekit-redis livekit livekit-egress api
+```
+
+New broadcasts on a weekly LIVE invite plan use Bunny with this overlay. The host and invited performers stay on LiveKit. Eligible viewers receive a short-lived signed URL scoped to that room, and relative playlist and segment requests inherit the signature. The original invite code, chat, and stage request flow stay in Mwitu. The API waits for a valid signed HLS response and an authorization failure on the unsigned URL before issuing viewer playback.
+
+To test invite joins, chat delivery, viewer authorization, and stage grants against an isolated database, build the API and set `MWITU_LOAD_DATABASE_URL` to a localhost PostgreSQL account that can create a temporary database. Run `node deploy/load-live-audience.mjs`. It defaults to 18,000 join attempts at 160 concurrent workers and opens 1,000 guest feeds for the chat test. It uses a fixture for media availability. Use a real test broadcast separately to verify Bunny playback and expiry.
 
 ### Deliver large LIVE audiences through Cloudflare Stream
 

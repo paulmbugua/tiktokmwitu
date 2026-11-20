@@ -1,0 +1,16 @@
+services:
+  api:
+    environment:
+      LIVE_AUDIENCE_PROVIDER: ${LIVE_AUDIENCE_PROVIDER:-bunny}
+      BUNNY_VIEWER_TOKEN_KEY: ${BUNNY_VIEWER_TOKEN_KEY:?Set the Bunny viewer token key}
+      BUNNY_RTMP_PASSWORD: ${BUNNY_RTMP_PASSWORD:?Set the private publisher password}
+  livekit-egress:
+    networks:
+      default:
+        gw_priority: 1
+      bunny_media:
+
+networks:
+  bunny_media:
+    external: true
+    name: tiktokmwitu-bunny_bunny_media

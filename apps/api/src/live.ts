@@ -11,7 +11,7 @@ import { currentMatch, endMatch, lockedRoom, matchGuests, member, requireOpen, s
 import { recentGifts } from './gift-store';
 import { browserKey } from './commerce';
 import { checkInvite, claimInvite, isAudienceCode, normalizeInvite, type InvitePass } from './live-invites';
-import { enqueueStream, playback, streamEnabled } from './live-stream';
+import { enqueueStream, playback, streamEnabled, type StreamSource } from './live-stream';
 import { activePlanSql, audienceBalance, maxLiveMinutes, meterLive, requireAudienceBalance } from './live-pricing';
 
 const { LIVEKIT_URL: url, LIVEKIT_API_KEY: key, LIVEKIT_API_SECRET: secret } = process.env;
@@ -40,8 +40,9 @@ async function roomMessages(client: PoolClient | typeof db, room: LiveRoom, gues
 }
 
 async function loadBroadcast(id: string) {
-  const { rows: [room] } = await db.query<LiveRoom & { input_id: string | null; available: boolean }>(`
-    SELECT r.*,s.input_id,s.available FROM live_rooms r LEFT JOIN live_streams s ON s.room_id=r.id WHERE r.id=$1`, [id]);
+  const { rows: [room] } = await db.query<LiveRoom & StreamSource & { available: boolean }>(`
+    SELECT r.*,r.id AS room_id,s.input_id,s.provider,s.available FROM live_rooms r
+    LEFT JOIN live_streams s ON s.room_id=r.id WHERE r.id=$1`, [id]);
   if (!room) throw new NotFoundException('Broadcast not found.');
   const [matchResult, stage, messages, gifts] = await Promise.all([
     db.query<{ id: string }>(`SELECT m.id,m.guest_id,m.status,m.starts_at,m.ends_at,m.expires_at,m.host_score,m.guest_score,
@@ -55,7 +56,7 @@ async function loadBroadcast(id: string) {
   return {
     room: { id, ended: !!room.ended_at, endedReason: room.end_reason, endsAt: room.deadline_at,
       guest_access: room.guest_access, chat_open: room.chat_open, pinned_id: room.pinned_id },
-    playback: !room.ended_at && room.available ? playback(room.input_id) : null,
+    playback: !room.ended_at && room.available ? playback(room) : null,
     stage, match: match ? { ...match, guests: await matchGuests(db, match.id) } : undefined,
     messages, gifts, now: Date.now(),
   };
@@ -555,15 +556,14 @@ export class LiveController {
     const user = await requireUser(req);
     const id = uuid(raw);
     await waitForCamera(id, user.id);
-    const metered = await lockedRoom(id, async (client, room) => {
+    await lockedRoom(id, async (client, room) => {
       if (room.host_id !== user.id || room.ended_at) throw new ForbiddenException();
       await requireAudienceBalance(client, room.invite_plan_id);
       await client.query(`UPDATE live_rooms SET online_at=COALESCE(online_at,now()),
         deadline_at=COALESCE(deadline_at,COALESCE(online_at,now())+make_interval(mins=>$2))
         WHERE id=$1`, [id, maxLiveMinutes]);
-      return !!room.invite_plan_id;
+      if (room.invite_plan_id) await enqueueStream(client, id);
     });
-    if (metered) await enqueueStream(id);
     return { ok: true };
   }
 

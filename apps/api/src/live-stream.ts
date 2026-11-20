@@ -1,5 +1,6 @@
-import { createPrivateKey, sign } from 'node:crypto';
+import { createHmac, createPrivateKey, sign } from 'node:crypto';
 import { EgressClient, EncodingOptions, StreamOutput, StreamProtocol } from 'livekit-server-sdk';
+import type { PoolClient } from 'pg';
 import { db, origin } from './infra';
 
 const account = process.env.CF_STREAM_ACCOUNT_ID ?? '';
@@ -13,9 +14,15 @@ const signingKey = configured ? createPrivateKey({
   key: JSON.parse(Buffer.from(encodedKey!, 'base64').toString('utf8')), format: 'jwk',
 }) : null;
 const internal = process.env.LIVEKIT_INTERNAL_URL || process.env.LIVEKIT_URL;
-const egress = signingKey && internal && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET
-  ? new EgressClient(internal, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, { requestTimeout: 20 }) : null;
-export const streamEnabled = !!egress;
+const bunnyHost = process.env.BUNNY_LIVE_HOST ?? 'mwitulive.b-cdn.net';
+const bunnyKey = process.env.BUNNY_VIEWER_TOKEN_KEY;
+const publisherPassword = process.env.BUNNY_RTMP_PASSWORD;
+const bunnyConfigured = !!(bunnyKey && publisherPassword && /^[a-z0-9-]+\.b-cdn\.net$/.test(bunnyHost));
+type Provider = 'bunny' | 'cloudflare';
+const preferred: Provider = process.env.LIVE_AUDIENCE_PROVIDER === 'bunny' ? 'bunny' : 'cloudflare';
+const egress = (signingKey || bunnyConfigured) && internal && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET
+  ? new EgressClient(internal, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, { requestTimeout: 30 }) : null;
+export const streamEnabled = !!egress && (preferred === 'bunny' ? bunnyConfigured : !!signingKey);
 export const streamSchema = `
 CREATE TABLE IF NOT EXISTS live_streams (
   room_id uuid PRIMARY KEY REFERENCES live_rooms ON DELETE CASCADE,
@@ -24,11 +31,13 @@ CREATE TABLE IF NOT EXISTS live_streams (
   checked_at timestamptz NOT NULL DEFAULT '-infinity',
   available boolean NOT NULL DEFAULT false
 );
+ALTER TABLE live_streams ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'cloudflare';
 CREATE INDEX IF NOT EXISTS live_streams_due ON live_streams(checked_at);
 `;
 
 type Input = { uid: string; rtmps: { url: string; streamKey: string } };
-type StreamRow = { room_id: string; input_id: string | null; egress_id: string | null; ended_at: Date | null };
+export type StreamSource = { provider: Provider | null; room_id: string; input_id: string | null };
+type StreamRow = StreamSource & { egress_id: string | null; ended_at: Date | null };
 const idPattern = /^[a-f0-9]{32}$/;
 const roomName = (id: string) => 'mwitu-' + id;
 
@@ -46,7 +55,18 @@ async function cloud<T>(path: string, method = 'GET', body?: object): Promise<T>
 
 // Token windows are identical across viewers, so one signature can serve the whole audience.
 const tokens = new Map<string, { epoch: number; url: string }>();
-export function playback(input: string | null) {
+export function bunnyPlaybackUrl(host: string, key: string, roomId: string, expires: number) {
+  const path = `/${roomName(roomId)}/`;
+  const token = createHmac('sha256', key).update(path + expires + 'token_path=' + path).digest('base64url');
+  return `https://${host}/bcdn_token=HS256-${token}&expires=${expires}&token_path=${encodeURIComponent(path)}${path}index.m3u8`;
+}
+
+export function playback({ provider, room_id: roomId, input_id: input }: StreamSource) {
+  if (provider === 'bunny') {
+    if (!bunnyConfigured || !bunnyKey) return null;
+    // Sign for two one-minute windows so clients can refresh before expiration.
+    return bunnyPlaybackUrl(bunnyHost, bunnyKey, roomId, (Math.floor(Date.now() / 60000) + 2) * 60);
+  }
   if (!signingKey || !input || !idPattern.test(input)) return null;
   const epoch = Math.floor(Date.now() / 300000);
   const prior = tokens.get(input);
@@ -61,15 +81,21 @@ export function playback(input: string | null) {
   return url;
 }
 
-export async function enqueueStream(id: string) {
-  if (egress) await db.query('INSERT INTO live_streams(room_id) VALUES ($1) ON CONFLICT DO NOTHING', [id]);
+export async function enqueueStream(client: PoolClient, id: string) {
+  if (streamEnabled) {
+    await client.query('INSERT INTO live_streams(room_id,provider) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, preferred]);
+  }
 }
 
 async function update(row: StreamRow) {
   const { room_id: id } = row;
   const name = roomName(id);
+  const bunny = row.provider === 'bunny';
+  if (bunny ? !bunnyConfigured : !signingKey) return;
   if (row.ended_at) {
-    if (row.egress_id) await egress!.stopEgress(row.egress_id).catch(() => undefined);
+    for (const output of await egress!.listEgress({ roomName: name, active: true })) {
+      if (output.egressId === row.egress_id || (bunny && !row.egress_id)) await egress!.stopEgress(output.egressId);
+    }
     if (row.input_id) {
       await cloud('/live_inputs/' + row.input_id, 'PUT', { enabled: false });
       tokens.delete(row.input_id);
@@ -81,7 +107,7 @@ async function update(row: StreamRow) {
   }
   let inputId = row.input_id;
   let input: Input | undefined;
-  if (!inputId) {
+  if (!bunny && !inputId) {
     input = await cloud<Input>('/live_inputs', 'POST', {
       meta: { name, roomId: id }, preferLowLatency: true,
       recording: { mode: 'automatic', requireSignedURLs: true, allowedOrigins: ['tiktokmwitu.co.ke', 'www.tiktokmwitu.co.ke'] },
@@ -91,25 +117,36 @@ async function update(row: StreamRow) {
     inputId = input.uid;
     await db.query('UPDATE live_streams SET input_id=$2 WHERE room_id=$1', [id, inputId]);
   }
-  const active = (await egress!.listEgress({ roomName: name, active: true }))[0];
+  const outputs = await egress!.listEgress({ roomName: name, active: true });
+  const active = outputs.find(output => output.egressId === row.egress_id) ?? outputs[0];
   if (!active) {
-    input ??= await cloud<Input>('/live_inputs/' + inputId);
-    const ingest = new URL(input.rtmps.url);
-    if (ingest.protocol !== 'rtmps:' || ingest.hostname !== 'live.cloudflare.com' ||
-        !/^[\w-]+$/.test(input.rtmps.streamKey)) throw new Error('Unexpected Stream ingest destination');
+    let destination: string;
+    if (bunny) {
+      destination = `rtmp://bunny-media:1935/live/${name}?user=mwitu&pass=${encodeURIComponent(publisherPassword!)}`;
+    } else {
+      input ??= await cloud<Input>('/live_inputs/' + inputId);
+      const ingest = new URL(input.rtmps.url);
+      if (ingest.protocol !== 'rtmps:' || ingest.hostname !== 'live.cloudflare.com' ||
+          !/^[\w-]+$/.test(input.rtmps.streamKey)) throw new Error('Unexpected Stream ingest destination');
+      destination = ingest.href.replace(/\/$/, '') + '/' + input.rtmps.streamKey;
+    }
     const started = await egress!.startRoomCompositeEgress(name,
-      new StreamOutput({ protocol: StreamProtocol.RTMP, urls: [ingest.href.replace(/\/$/, '') + '/' + input.rtmps.streamKey] }),
+      new StreamOutput({ protocol: StreamProtocol.RTMP, urls: [destination] }),
       { layout: 'grid', encodingOptions: new EncodingOptions({
         width: 720, height: 1280, framerate: 24, videoBitrate: 2400, audioBitrate: 96, keyFrameInterval: 2,
       }) });
     await db.query('UPDATE live_streams SET egress_id=$2,available=false WHERE room_id=$1', [id, started.egressId]);
     return;
   }
-  const manifest = await fetch(playback(inputId)!, {
-    headers: { Origin: origin, Referer: origin + '/' }, signal: AbortSignal.timeout(5000),
-  });
-  const live = manifest.ok && (await manifest.text()).startsWith('#EXTM3U');
+  const options = { headers: { Origin: origin, Referer: origin + '/' }, signal: AbortSignal.timeout(5000) };
+  const manifest = await fetch(playback({ ...row, input_id: inputId })!, options);
+  let live = manifest.ok && (await manifest.text()).startsWith('#EXTM3U');
   if (!manifest.ok) await manifest.body?.cancel();
+  if (bunny && live) {
+    const unsigned = await fetch(`https://${bunnyHost}/${name}/index.m3u8`, options);
+    await unsigned.body?.cancel();
+    live = unsigned.status === 403 || unsigned.status === 401;
+  }
   await db.query('UPDATE live_streams SET egress_id=$2,available=$3 WHERE room_id=$1', [id, active.egressId, live]);
 }
 
@@ -123,10 +160,11 @@ export async function reconcileStreams() {
       WHERE s.room_id=r.id AND s.room_id IN (
         SELECT room_id FROM live_streams WHERE checked_at<now()-interval '10 seconds'
         ORDER BY checked_at LIMIT 8
-      ) RETURNING s.room_id,s.input_id,s.egress_id,r.ended_at`);
-    await Promise.all(rows.map(row => update(row).catch(() => {
+      ) RETURNING s.room_id,s.input_id,s.egress_id,s.provider,r.ended_at`);
+    await Promise.all(rows.map(row => update(row).catch(async () => {
       // Provider errors may include RTMPS credentials. Log only the room identifier.
       console.warn('LIVE audience delivery will retry', row.room_id);
+      if (row.provider === 'bunny') await db.query('UPDATE live_streams SET available=false WHERE room_id=$1', [row.room_id]);
     })));
   } catch {
     console.warn('LIVE audience reconciliation will retry');

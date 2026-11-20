@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -23,7 +23,7 @@ const invitation = '/live/handoff/624190';
 const database = 'mwitu_stream_' + randomBytes(6).toString('hex');
 const host = randomUUID();
 const room = randomUUID();
-const input = randomBytes(16).toString('hex');
+const bunnyKey = randomBytes(32).toString('hex');
 const accounts = Array.from({ length: Math.min(total, 500) }, () => ({
   userId: randomUUID(), token: randomBytes(32).toString('base64url'),
 }));
@@ -109,15 +109,15 @@ try {
   await admin.query('CREATE DATABASE ' + database);
   created = true;
   await new Promise(resolve => rtc.listen(0, '127.0.0.1', resolve));
-  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   api = spawn(process.execPath, ['apps/api/dist/main.js'], {
     cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, DATABASE_URL: data.toString(), API_PORT: '4473', API_HOST: '127.0.0.1', MEDIA_DIR: folder,
       TRUST_CLOUDFLARE_TUNNEL: 'true', APP_ORIGIN: base, LIVEKIT_URL: 'ws://127.0.0.1:' + rtc.address().port,
       LIVEKIT_API_KEY: 'mwitu-load', LIVEKIT_API_SECRET: 'local-fixture-only',
-      CF_STREAM_ACCOUNT_ID: input, CF_STREAM_API_TOKEN: 'fixture-token', CF_STREAM_SIGNING_KEY_ID: input,
-      CF_STREAM_PLAYBACK_HOST: 'customer-loadtest.cloudflarestream.com',
-      CF_STREAM_SIGNING_KEY_JWK: Buffer.from(JSON.stringify(privateKey.export({ format: 'jwk' }))).toString('base64'),
+      LIVEKIT_INTERNAL_URL: '',
+      LIVE_AUDIENCE_PROVIDER: 'bunny', BUNNY_VIEWER_TOKEN_KEY: bunnyKey,
+      BUNNY_RTMP_PASSWORD: 'fixture-only', BUNNY_LIVE_HOST: 'mwitulive.b-cdn.net',
+      CF_STREAM_ACCOUNT_ID: '',
     },
   });
   api.stdout.on('data', data => { if (process.env.MWITU_LOAD_VERBOSE) process.stdout.write(data); });
@@ -128,12 +128,14 @@ try {
   const plan = await pool.query('INSERT INTO live_invite_plans(user_id,coins,request_id) VALUES($1,1000,$2) RETURNING id', [host, randomUUID()]);
   await pool.query("INSERT INTO live_invite_passes(code,room_id,plan_id,request_id,expires_at) VALUES('624190',$1,$2,$3,now()+interval '1 hour')", [room, plan.rows[0].id, randomUUID()]);
   // Seed media readiness and keep actual provider requests out of the load test.
-  await pool.query("INSERT INTO live_streams(room_id,input_id,available,checked_at) VALUES($1,$2,true,'infinity')", [room, input]);
+  await pool.query("INSERT INTO live_streams(room_id,provider,available,checked_at) VALUES($1,'bunny',true,'infinity')", [room]);
   await pool.query("INSERT INTO users(id,handle,display_name,password_hash) SELECT id,'load_'||ord,'Load viewer '||ord,'fixture' FROM unnest($1::uuid[]) WITH ORDINALITY AS u(id,ord)", [accounts.map(a => a.userId)]);
   await pool.query("INSERT INTO sessions(user_id,digest,expires_at) SELECT id,digest,now()+interval '1 hour' FROM unnest($1::uuid[],$2::text[]) AS s(id,digest)", [
     accounts.map(a => a.userId), accounts.map(a => createHash('sha256').update(a.token).digest('hex')),
   ]);
   const guestCookies = new Array(total);
+  await call(invitation + '/state', { index: total + 1, statuses: [403] });
+  await call('/live/' + room + '/state', { index: total + 1, statuses: [401] });
   const start = performance.now();
   await concurrent(total, async index => {
     if (index < accounts.length) {
@@ -163,7 +165,18 @@ try {
     const { value } = await call(path, { index, cookie: guestCookies[index] });
     assert.equal(value.room.id, room);
     assert.equal(value.messages.length, Math.min(accounts.length, 60));
-    assert.match(value.playback, /^https:\/\/customer-loadtest\.cloudflarestream\.com\/.+\/manifest\/video\.m3u8$/);
+    const playlist = new URL(value.playback);
+    assert.equal(playlist.origin, 'https://mwitulive.b-cdn.net');
+    const [, parameters, directory, file] = playlist.pathname.split('/');
+    assert.equal(directory, 'mwitu-' + room);
+    assert.equal(file, 'index.m3u8');
+    const token = new URLSearchParams(parameters);
+    const scope = '/' + directory + '/';
+    assert.equal(token.get('token_path'), scope);
+    const expiration = Number(token.get('expires'));
+    assert(expiration > Date.now() / 1000 && expiration <= Date.now() / 1000 + 120);
+    const expected = createHmac('sha256', bunnyKey).update(scope + expiration + 'token_path=' + scope).digest('base64url');
+    assert.equal(token.get('bcdn_token'), 'HS256-' + expected);
   });
   const pollSeconds = (performance.now() - pollStart) / 1000;
   const listenersToOpen = Math.min(listeners, total - accounts.length);

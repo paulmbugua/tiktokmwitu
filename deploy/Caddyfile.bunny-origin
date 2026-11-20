@@ -13,6 +13,7 @@
 			path_regexp ^/mwitu-[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}/[a-zA-Z0-9_-]+[.]m3u8$
 		}
 		handle @playlist {
+			rewrite * /live{uri}
 			reverse_proxy bunny-media:8888 {
 				header_up -X-Mwitu-Origin-Key
 				header_up Authorization "Bearer {$BUNNY_MTX_CDN_SECRET}"
@@ -25,6 +26,7 @@
 			path_regexp ^/mwitu-[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}/[a-zA-Z0-9_-]+[.]ts$
 		}
 		handle @segment {
+			rewrite * /live{uri}
 			reverse_proxy bunny-media:8888 {
 				header_up -X-Mwitu-Origin-Key
 				header_up Authorization "Bearer {$BUNNY_MTX_CDN_SECRET}"
