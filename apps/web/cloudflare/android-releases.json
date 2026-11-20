@@ -1,14 +1,14 @@
 {
   "latest": {
-    "version": "1.0.7",
-    "versionCode": 8,
+    "version": "1.0.8",
+    "versionCode": 9,
     "minSdk": 24,
     "notes": [
-      "Profile covers extend behind the Android status bar.",
-      "Tap the pin on your profile or cover photo to change it."
+      "The right-side feed controls now sit above the bottom navigation."
     ]
   },
   "previous": [
+    "1.0.7",
     "1.0.6",
     "1.0.5",
     "1.0.4",
