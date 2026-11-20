@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { setMaxListeners } from 'node:events';
 import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -42,6 +43,8 @@ let api;
 let created = false;
 const samples = new Map();
 const streams = new AbortController();
+// The test intentionally cancels all open guest feeds together.
+setMaxListeners(listeners + 16, streams.signal);
 
 async function guestEvents(cookie, index) {
   const ip = '10.2.' + (1 + Math.floor(index / 254) % 254) + '.' + (1 + index % 254);
