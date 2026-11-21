@@ -70,7 +70,16 @@ dialog[data-panel="profile"] > .dialog-inner > header .icon {
 .creator-stats dd { margin: 0; font-size: 1.2rem; font-weight: 750; text-shadow: 0 1px 6px #110a19; }
 .creator-stats dt { color: #eadff3; font-size: .82rem; text-shadow: 0 1px 6px #110a19; }
 .creator-bio { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
-.creator-site { color: var(--accent); overflow-wrap: anywhere; }
+.creator-site-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.creator-site-row > .secondary, .creator-site {
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.creator-site {
+  min-width: 0; min-height: 44px; padding: 8px 11px; border-radius: 10px;
+  background: #ffffff0c; color: var(--accent);
+}
+.creator-site span { overflow-wrap: anywhere; }
+.creator-site svg { flex: none; }
 .creator-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .creator-actions button { display: inline-flex; align-items: center; gap: 7px; }
 .creator-collections { display: flex; border-block: 1px solid #ffffff17; }

@@ -8,6 +8,8 @@ import {
   type Person,
 } from './infra';
 
+const websiteField = z.union([z.literal(''), z.url({ protocol: /^https?$/ }).max(300)]);
+
 async function person(handle: string) {
   const { rows: [user] } = await db.query<Person>(
     'SELECT id,handle,display_name FROM users WHERE handle=$1', [parse(handleSchema, handle)]);
@@ -41,13 +43,30 @@ export class SocialController {
     const profile = parse(z.object({
       display_name: cleanText(48),
       bio: z.union([z.literal(''), cleanText(160)]),
-      website: z.union([z.literal(''), z.url({ protocol: /^https?$/ }).max(300)]),
+      website: websiteField.optional(),
     }), body);
     const { rows: [updated] } = await db.query<Person>(`
-      UPDATE users SET display_name=$2,bio=$3,website=$4 WHERE id=$1 RETURNING id,handle,display_name`,
-      [user.id, profile.display_name, profile.bio, profile.website]);
+      UPDATE users SET display_name=$2,bio=$3,website=COALESCE($4,website) WHERE id=$1 RETURNING id,handle,display_name`,
+      [user.id, profile.display_name, profile.bio, profile.website ?? null]);
     publishFeed();
     return updated;
+  }
+
+  @Put('account/profile/website')
+  async editWebsite(@Req() req: Request, @Body() body: unknown) {
+    const user = await requireUser(req);
+    const { website } = parse(z.object({
+      website: websiteField.refine(value => {
+        if (!value) return true;
+        try {
+          const url = new URL(value);
+          return url.protocol === 'https:' && !url.username && !url.password;
+        } catch { return false; }
+      }, 'Enter a valid HTTPS website URL.'),
+    }), body);
+    await db.query('UPDATE users SET website=$2 WHERE id=$1', [user.id, website]);
+    publishFeed();
+    return { website };
   }
 
   @Put('creators/:handle/follow')

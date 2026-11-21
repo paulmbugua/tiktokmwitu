@@ -1,6 +1,6 @@
 'use client';
 
-import { Bookmark, Clapperboard, Grid3X3, Heart, Images, Menu, Pencil, Pin, Plus, RotateCcw, X } from 'lucide-react';
+import { Bookmark, Clapperboard, ExternalLink, Grid3X3, Heart, Images, Link, Menu, Pencil, Pin, Plus, RotateCcw, X } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, mediaUrl, send, useData, type Feed, type Person, type Video } from './client';
 import type { UploadJob } from './profile-upload';
@@ -12,6 +12,51 @@ const collections = [
 ] as const;
 const count = new Intl.NumberFormat('en-KE', { notation: 'compact' });
 const poster = (id: string) => mediaUrl(id).replace(/\.mp4$/, '.jpg');
+
+function ProfileWebsite({ value, owner, changed }: { value: string; owner: boolean; changed: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState<{ previous: string; next: string }>();
+  const website = saved?.previous === value ? saved.next : value;
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving) return;
+    const input = String(new FormData(event.currentTarget).get('website')).trim();
+    const url = input && !input.includes('://') ? 'https://' + input : input;
+    setSaving(true);
+    setError('');
+    try {
+      const result = await send<{ website: string }>('/account/profile/website', 'PUT', { website: url });
+      setSaved({ previous: value, next: result.website });
+      setEditing(false);
+      changed();
+    } catch (error) { setError((error as Error).message); }
+    finally { setSaving(false); }
+  }
+
+  if (!website && !owner) return null;
+  const inApp = typeof navigator !== 'undefined' && /MwituFlutter\//.test(navigator.userAgent);
+  return editing && owner ? <form className="creator-site-form" onSubmit={save}>
+    <label>Website URL<input name="website" inputMode="url" autoCapitalize="none" spellCheck={false}
+      maxLength={300} defaultValue={website} placeholder="https://example.com" autoFocus /></label>
+    <div className="creator-actions">
+      <button type="submit" className="primary" disabled={saving}>{saving ? 'Saving…' : 'Save website'}</button>
+      <button type="button" className="secondary" disabled={saving} onClick={() => { setEditing(false); setError(''); }}>Cancel</button>
+    </div>
+    {error && <p className="error" role="alert">{error}</p>}
+  </form> : <div className="creator-site-row">
+    {website && <a className="creator-site" href={website} rel="noopener noreferrer ugc" target={inApp ? '_self' : '_blank'}>
+      <Link size={17} aria-hidden="true" /><span>{website.replace(/^https?:\/\//i, '')}</span><ExternalLink size={15} aria-hidden="true" />
+    </a>}
+    {owner && <button className={website ? 'icon' : 'secondary'} type="button"
+      aria-label={website ? 'Edit website' : 'Add website'} title={website ? 'Edit website' : undefined}
+      onClick={() => setEditing(true)}>
+      {website ? <Pencil size={17} /> : <><Link size={16} /> Add website</>}
+    </button>}
+  </div>;
+}
 
 function ProfilePhoto({ kind, id, changed }: { kind: 'avatar' | 'cover'; id?: string | null; changed: () => void }) {
   const label = kind === 'avatar' ? 'Profile photo' : 'Cover photo';
@@ -121,8 +166,9 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [photoRevision, setPhotoRevision] = useState(0);
-  const result = useData<import('./client').Profile>('/creators/' + encodeURIComponent(handle), revision + photoRevision);
+  const [profileRevision, setProfileRevision] = useState(0);
+  const refreshProfile = () => setProfileRevision(value => value + 1);
+  const result = useData<import('./client').Profile>('/creators/' + encodeURIComponent(handle), revision + profileRevision);
   const profile = result?.data;
   const active = mine ? collection : 'Posts';
   const path = active === 'Saved' ? '/videos/saved?' : active === 'Liked' ? '/videos?galleries=true&liked=true&' : '/videos?galleries=true&creator=' + encodeURIComponent(handle) + '&';
@@ -154,7 +200,7 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
     setError('');
     try {
       const person = await send<Person>('/account/profile', 'PUT', {
-        display_name: String(data.get('display_name')).trim(), bio: String(data.get('bio')).trim(), website: String(data.get('website')).trim(),
+        display_name: String(data.get('display_name')).trim(), bio: String(data.get('bio')).trim(),
       });
       updated(person);
       setEditing(false);
@@ -165,7 +211,7 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
   return <div className="creator-page">
     {identity && <div className="creator-cover" data-custom={!!profile?.cover_id}>
       {profile?.cover_id && <img src={poster(profile.cover_id)} alt="" crossOrigin="anonymous" />}
-      {mine && profile && <ProfilePhoto kind="cover" id={profile.cover_id} changed={() => setPhotoRevision(value => value + 1)} />}
+      {mine && profile && <ProfilePhoto kind="cover" id={profile.cover_id} changed={refreshProfile} />}
     </div>}
     {identity && <div className="creator-intro">
       <div className="creator-identity">
@@ -173,7 +219,7 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
           <div className="creator-avatar" aria-hidden="true">
             {profile?.avatar_id ? <img src={poster(profile.avatar_id)} alt="" crossOrigin="anonymous" /> : identity.display_name.slice(0, 1).toUpperCase()}
           </div>
-          {mine && profile && <ProfilePhoto kind="avatar" id={profile.avatar_id} changed={() => setPhotoRevision(value => value + 1)} />}
+          {mine && profile && <ProfilePhoto kind="avatar" id={profile.avatar_id} changed={refreshProfile} />}
         </div>
         <div><h3>{identity.display_name}</h3><p>@{identity.handle}</p></div>
         {mine && <button className="icon" aria-label="Account settings" onClick={account}><Menu size={21} /></button>}
@@ -184,7 +230,6 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
         <div><dt>Likes</dt><dd>{profile ? count.format(profile.likes ?? 0) : '–'}</dd></div>
       </dl>
       {profile?.bio && <p className="creator-bio">{profile.bio}</p>}
-      {profile?.website && <a className="creator-site" href={profile.website} rel="noopener noreferrer" target="_blank">{profile.website}</a>}
       <div className="creator-actions">
         {mine ? <>
           <button className="primary" onClick={post}><Plus size={17} /> Create a post</button>
@@ -194,10 +239,10 @@ export default function CreatorProfile({ handle, user, jobs, revision, show, ret
           <button className="secondary" onClick={message}>Message</button>
         </>}
       </div>
+      {profile && <ProfileWebsite value={profile.website} owner={mine} changed={refreshProfile} />}
       {editing && <form onSubmit={save}>
         <label>Display name<input name="display_name" defaultValue={identity.display_name} maxLength={48} required /></label>
         <label>Bio<textarea name="bio" defaultValue={profile?.bio} maxLength={160} /></label>
-        <label>Website<input name="website" type="url" defaultValue={profile?.website} maxLength={300} placeholder="https://" /></label>
         <div className="creator-actions">
           <button type="submit" className="primary" disabled={saving}>Save profile</button>
           <button type="button" className="secondary" disabled={saving} onClick={() => { setEditing(false); setError(''); }}>Cancel</button>
