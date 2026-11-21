@@ -1,13 +1,16 @@
 {
   "latest": {
-    "version": "1.0.8",
-    "versionCode": 9,
+    "version": "1.0.9",
+    "versionCode": 10,
     "minSdk": 24,
     "notes": [
-      "The right-side feed controls now sit above the bottom navigation."
+      "Tap the handle on a post to open its creator profile.",
+      "Profile stats sit over the cover photo.",
+      "LIVE viewers can send tap hearts."
     ]
   },
   "previous": [
+    "1.0.8",
     "1.0.7",
     "1.0.6",
     "1.0.5",
