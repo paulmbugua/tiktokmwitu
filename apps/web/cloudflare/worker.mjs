@@ -117,7 +117,7 @@ export default {
       if (publicSite && [...url.searchParams].length === 1 && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id ?? '')) {
         return Response.redirect(new URL('/watch/' + id.toLowerCase(), url), 308);
       }
-      const privateView = ['live', 'room', 'topup', 'v', 'browse', 'google'].some(key => url.searchParams.has(key));
+      const privateView = ['live', 'room', 'topup', 'v', 'browse', 'creator', 'google'].some(key => url.searchParams.has(key));
       url.pathname = adminSite ? '/admin.html' : '/index.html';
       const response = await env.ASSETS.fetch(new Request(url, request));
       if (adminSite || privateView) return noIndex(response);

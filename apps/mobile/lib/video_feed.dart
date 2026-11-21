@@ -509,12 +509,23 @@ class _VideoCardState extends State<_VideoCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '@${widget.clip.handle}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                    shadows: [Shadow(blurRadius: 4)],
+                Semantics(
+                  button: true,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () =>
+                        widget.open(workspaceUri(creator: widget.clip.handle)),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      child: Text(
+                        '@${widget.clip.handle}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                          shadows: [Shadow(blurRadius: 4)],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 if (widget.clip.caption.isNotEmpty)

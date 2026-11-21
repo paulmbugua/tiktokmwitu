@@ -15,13 +15,18 @@ bool isMwituWeb(Uri uri) =>
     uri.userInfo.isEmpty &&
     (uri.host == mwituHost || uri.host == 'www.$mwituHost');
 
-Uri workspaceUri({String? tab, String? video, String? action}) =>
-    Uri.https(mwituHost, '/', {
-      'browse': ?tab,
-      'v': ?video,
-      if (video != null) 'app': '1',
-      'action': ?action,
-    });
+Uri workspaceUri({
+  String? tab,
+  String? video,
+  String? action,
+  String? creator,
+}) => Uri.https(mwituHost, '/', {
+  'browse': ?tab,
+  'v': ?video,
+  if (video != null) 'app': '1',
+  'action': ?action,
+  'creator': ?creator,
+});
 
 Uri? appDestination(Uri incoming) {
   final custom =

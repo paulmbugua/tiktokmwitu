@@ -216,6 +216,8 @@ export default function Home() {
     const videoId = id && /^[a-f0-9-]{36}$/i.test(id) ? id : undefined;
     if (videoId) setShared(videoId);
     const destination = params.get('browse');
+    const creatorHandle = params.get('creator');
+    if (creatorHandle && /^[a-z0-9_]{3,24}$/.test(creatorHandle)) setPanel({ kind: 'profile', handle: creatorHandle });
     const googleStatus = params.get('google');
     if (destination === 'videos') setTab('Discover');
     if (destination === 'following') setTab('Following');

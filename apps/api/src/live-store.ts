@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS live_reports (
 `;
 
 export type LiveRoom = {
+  like_started_at: Date | null; like_total: number; like_baseline: number;
   id: string; host_id: string; online_at: Date | null; ended_at: Date | null; created_at: Date;
   chat_open: boolean; keywords: string[]; pinned_id: string | null; share_code: string; guest_access: boolean;
   spotlight_id: string | null; spotlight_fullscreen: boolean; stage_cards: number;

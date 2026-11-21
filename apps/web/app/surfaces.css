@@ -560,3 +560,19 @@ dialog:has(.arena) { background: #100c17; }
   right: max(12px, env(safe-area-inset-right));
   z-index: 1;
 }
+.arena-tools .live-hearts { order: 10; margin-inline-start: auto; position: relative; }
+.live-hearts .arena-action { color: #ff9ab6; }
+.live-heart-float { position: absolute; bottom: 95%; right: 16px; width: 24px; pointer-events: none; }
+.live-heart-float svg { position: absolute; bottom: 0; animation: mwitu-live-heart 1.3s ease-out both; color: #ff83a9; }
+.live-heart-float .live-heart-color-1 { color: #d3fc77; margin-left: -9px; }
+.live-heart-float .live-heart-color-2 { color: #d5a5ff; margin-left: 8px; }
+.live-heart-error { position: absolute; right: 0; bottom: 100%; width: max-content; max-width: 180px; background: #1c1329; padding: 5px; }
+.live-like-goal[data-warning="true"] { background: #55312f; color: #fff2d5; }
+@keyframes mwitu-live-heart {
+  from { transform: translateY(0) scale(.65); opacity: 1; }
+  to { transform: translateY(-116px) scale(1.25); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-heart-float svg { animation-duration: .12s; animation-name: mwitu-live-heart-fade; }
+}
+@keyframes mwitu-live-heart-fade { to { opacity: 0; } }

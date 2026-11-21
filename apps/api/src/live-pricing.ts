@@ -3,6 +3,8 @@ import type { PoolClient } from 'pg';
 import { db } from './infra';
 
 export const maxLiveMinutes = 60;
+export const liveLikeTarget = 20;
+export const liveLikeMinimumViewers = 3;
 export const viewerMinutePack = { coins: 150, viewerMinutes: 10000 };
 export const livePlans = [
   { coins: 1000, limit: 5, viewerMinutes: 50000 },
@@ -16,6 +18,16 @@ ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS deadline_at timestamptz;
 ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS meter_at timestamptz;
 ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS meter_viewers integer NOT NULL DEFAULT 0;
 ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS end_reason text;
+ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS like_started_at timestamptz;
+ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS like_total integer NOT NULL DEFAULT 0;
+ALTER TABLE live_rooms ADD COLUMN IF NOT EXISTS like_baseline integer NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS live_like_batches (
+  room_id uuid REFERENCES live_rooms ON DELETE CASCADE,
+  actor text NOT NULL,
+  bucket bigint NOT NULL,
+  taps smallint NOT NULL,
+  PRIMARY KEY(room_id,actor,bucket)
+);
 UPDATE live_rooms SET deadline_at=online_at+interval '60 minutes'
 WHERE ended_at IS NULL AND online_at IS NOT NULL AND deadline_at IS NULL;
 CREATE TABLE IF NOT EXISTS live_viewer_packs (

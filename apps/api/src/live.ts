@@ -12,7 +12,7 @@ import { recentGifts } from './gift-store';
 import { browserKey } from './commerce';
 import { checkInvite, claimInvite, isAudienceCode, normalizeInvite, type InvitePass } from './live-invites';
 import { enqueueStream, playback, streamEnabled, type StreamSource } from './live-stream';
-import { activePlanSql, audienceBalance, maxLiveMinutes, meterLive, requireAudienceBalance } from './live-pricing';
+import { activePlanSql, audienceBalance, liveLikeMinimumViewers, liveLikeTarget, maxLiveMinutes, meterLive, requireAudienceBalance } from './live-pricing';
 
 const { LIVEKIT_URL: url, LIVEKIT_API_KEY: key, LIVEKIT_API_SECRET: secret } = process.env;
 const internalUrl = process.env.LIVEKIT_INTERNAL_URL || url;
@@ -23,6 +23,11 @@ export const roomName = (id: string) => 'mwitu-' + id;
 const encoder = new TextEncoder();
 export const guestIdentityPrefix = 'guest:';
 const minimumFollowers = 200;
+const likeWindowMs = 6 * 60_000;
+function likeGoal(room: LiveRoom) {
+  return { total: room.like_total, count: room.like_total - room.like_baseline, target: liveLikeTarget,
+    endsAt: room.like_started_at ? room.like_started_at.getTime() + likeWindowMs : null };
+}
 const hostingEligibility = `
   SELECT (SELECT count(*)::int FROM follows WHERE creator_id=$1) AS followers,
     EXISTS (SELECT 1 FROM live_invite_plans WHERE user_id=$1 AND ends_at>statement_timestamp()) AS "hasActivePlan"`;
@@ -57,6 +62,7 @@ async function loadBroadcast(id: string) {
     room: { id, ended: !!room.ended_at, endedReason: room.end_reason, endsAt: room.deadline_at,
       guest_access: room.guest_access, chat_open: room.chat_open, pinned_id: room.pinned_id },
     playback: !room.ended_at && room.available ? playback(room) : null,
+    likes: likeGoal(room),
     stage, match: match ? { ...match, guests: await matchGuests(db, match.id) } : undefined,
     messages, gifts, now: Date.now(),
   };
@@ -209,6 +215,8 @@ async function joinAudience(room: LiveRoom, user: Person) {
 export async function finishRoom(id: string, outcome: string, moderator?: Person) {
   const ended = await lockedRoom(id, async (client, room) => {
     if (room.ended_at) return true;
+    if (outcome === 'like_goal' && (!room.like_started_at ||
+        Date.now() < room.like_started_at.getTime() + likeWindowMs || likeGoal(room).count >= liveLikeTarget)) return false;
     if (room.invite_plan_id && room.online_at) {
       const budget = await meterLive(client, id, room.invite_plan_id, 0);
       if (outcome === 'audience_limit' && budget !== 'audience_limit' && budget !== 'plan_expired') return false;
@@ -217,6 +225,7 @@ export async function finishRoom(id: string, outcome: string, moderator?: Person
     await endMatch(client, room, outcome, !moderator && outcome === 'host_left' ? room.host_id : undefined);
     await client.query('DELETE FROM live_stage_seats WHERE room_id=$1', [id]);
     await client.query('DELETE FROM live_stage_requests WHERE room_id=$1', [id]);
+    await client.query('DELETE FROM live_like_batches WHERE room_id=$1', [id]);
     await client.query('UPDATE live_rooms SET ended_at=now(),end_reason=$2,spotlight_id=NULL,spotlight_fullscreen=false WHERE id=$1', [id, outcome]);
     await client.query("UPDATE live_streams SET available=false,checked_at='-infinity' WHERE room_id=$1", [id]);
     if (moderator) {
@@ -254,7 +263,7 @@ export async function reconcileLive() {
       const changed = await lockedRoom(room.id, async (client, fresh) => {
         if (fresh.ended_at) return false;
         const participants = remote.has(name) ? await service.listParticipants(name) : [];
-        if (fresh.online_at && fresh.invite_plan_id) {
+        if (fresh.online_at) {
           const stage = new Set(participants.filter(person =>
             person.identity === fresh.host_id || person.permission?.canPublish || person.permission?.hidden).map(person => person.identity));
           const { rows: [stream] } = await client.query<{ available: boolean }>(
@@ -262,8 +271,19 @@ export async function reconcileLive() {
           const viewers = new Set(participants.filter(person => !stage.has(person.identity) &&
             (fresh.guest_access || !person.identity.startsWith(guestIdentityPrefix))).map(person => person.identity));
           if (stream?.available) addStreamingAudience(fresh, stage, viewers);
-          const limit = await meterLive(client, fresh.id, fresh.invite_plan_id, viewers.size);
-          if (limit) return limit;
+          if (fresh.invite_plan_id) {
+            const limit = await meterLive(client, fresh.id, fresh.invite_plan_id, viewers.size);
+            if (limit) return limit;
+          }
+          if (viewers.size < liveLikeMinimumViewers && fresh.like_started_at) {
+            await client.query('UPDATE live_rooms SET like_started_at=NULL,like_baseline=like_total WHERE id=$1', [fresh.id]);
+          } else if (viewers.size >= liveLikeMinimumViewers && participants.some(person => person.identity === fresh.host_id)) {
+            const goal = likeGoal(fresh);
+            if (goal.endsAt && goal.endsAt <= Date.now() && goal.count < goal.target) return 'like_goal';
+            if (!goal.endsAt || goal.endsAt <= Date.now()) {
+              await client.query('UPDATE live_rooms SET like_started_at=now(),like_baseline=like_total WHERE id=$1', [fresh.id]);
+            }
+          }
         }
         const connected = participants.map(person => person.identity);
         if (connected.includes(fresh.host_id)) hostMissing.delete(fresh.id);
@@ -474,6 +494,7 @@ export class LiveController {
         [fresh.id]);
       return {
         self: { role: 'guest', mutedUntil: null },
+        likes: likeGoal(fresh),
         room: { id: fresh.id, ended: !!fresh.ended_at, endedReason: fresh.end_reason, endsAt: fresh.deadline_at,
           guest_access: fresh.guest_access, chat_open: false,
           pinned_id: fresh.guest_access ? fresh.pinned_id : null },
@@ -620,6 +641,7 @@ export class LiveController {
       return {
         self, hostProfile, room: { id: room.id, host_id: room.host_id, ended: !!room.ended_at,
           endedReason: room.end_reason, endsAt: room.deadline_at, chat_open: room.chat_open, pinned_id: room.pinned_id, guest_access: room.guest_access },
+        likes: likeGoal(room),
         audienceBudget: self.role === 'host' && room.invite_plan_id ? await audienceBalance(client, room.invite_plan_id) : undefined,
         audienceDelivery: self.role === 'host' && streamEnabled && room.invite_plan_id
           ? (await client.query('SELECT 1 FROM live_streams WHERE room_id=$1 AND available', [id])).rowCount ? 'ready' : 'starting'
@@ -628,6 +650,45 @@ export class LiveController {
         stage: await stageSnapshot(client, room, user.id), messages: await roomMessages(client, room),
         gifts: await recentGifts(client, room.id), now: Date.now(),
       };
+    });
+  }
+
+  @Post(':id/likes')
+  @Throttle({ default: { ttl: 60000, limit: 120 } })
+  async likeLive(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Param('id') raw: string, @Body() input: unknown) {
+    const id = uuid(raw);
+    const { taps, code } = parse(z.object({ taps: z.number().int().min(1).max(20), code: z.string().optional() }), input);
+    const user = await identity(req.cookies[cookie]);
+    let actor: string;
+    if (user && !code) {
+      actor = user.id;
+      if (!await joinedAudience(db, id, user.id)) await connectedUser(id, user.id);
+    } else {
+      if (!code) throw new ForbiddenException('Join the LIVE first.');
+      const invite = await handoffRoom(code);
+      if (invite.id !== id || !isAudienceCode(invite.code)) throw new ForbiddenException('Join the LIVE first.');
+      const browser = browserKey(req, res);
+      checkInvite(invite, browser);
+      actor = guestIdentityPrefix + browser;
+      if (!await streamRoom(id)) await connectedUser(id, actor);
+      else if (!(await db.query('SELECT 1 FROM live_invite_viewers WHERE code=$1 AND browser_key=$2', [invite.code, browser])).rowCount) {
+        throw new ForbiddenException('Join the LIVE first.');
+      }
+    }
+    return lockedRoom(id, async (client, room) => {
+      requireOpen(room);
+      if (user) await member(client, room, user);
+      if (user?.id === room.host_id || (code && !room.guest_access)) throw new ForbiddenException('Viewer likes only.');
+      const bucket = Math.floor(Date.now() / 10000);
+      const previous = (await client.query<{ taps: number }>(
+        'SELECT taps FROM live_like_batches WHERE room_id=$1 AND actor=$2 AND bucket=$3', [id, actor, bucket])).rows[0]?.taps ?? 0;
+      const accepted = Math.min(taps, 30 - previous);
+      if (accepted > 0) {
+        await client.query(`INSERT INTO live_like_batches(room_id,actor,bucket,taps) VALUES($1,$2,$3,$4)
+          ON CONFLICT(room_id,actor,bucket) DO UPDATE SET taps=EXCLUDED.taps`, [id, actor, bucket, previous + accepted]);
+        await client.query('UPDATE live_rooms SET like_total=like_total+$2 WHERE id=$1', [id, accepted]);
+      }
+      return { accepted };
     });
   }
 

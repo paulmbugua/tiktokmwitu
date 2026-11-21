@@ -13,6 +13,7 @@ import Promote from './promote';
 import ChallengeSetup from './live-challenge';
 import LiveChatLog, { type ChatLine } from './live-chat-log';
 import LiveStreamPlayer from './live-stream-player';
+import LiveHearts, { type LikeGoal } from './live-hearts';
 
 export type { ChatLine } from './live-chat-log';
 
@@ -32,6 +33,7 @@ type Match = {
 };
 type Snapshot = {
   audienceDelivery?: 'starting' | 'ready';
+  likes?: LikeGoal;
   audienceBudget?: { total_seconds: number; remaining_seconds: number };
   playback?: string | null;
   hostProfile?:{handle:string;following:boolean};
@@ -116,7 +118,10 @@ export default function Broadcast({ grant, user, signIn, leave }: {
   const endedMessage = state?.room.endedReason === 'duration_limit' ? 'LIVE reached its 60-minute limit.'
     : state?.room.endedReason === 'audience_limit' ? 'LIVE ended when the viewer-minute allowance ran out.'
     : state?.room.endedReason === 'plan_expired' ? 'The host’s weekly LIVE plan ended.'
+    : state?.room.endedReason === 'like_goal' ? 'LIVE ended because the room missed its likes goal.'
     : 'Broadcast ended.';
+  const goal = state?.likes;
+  const goalSeconds = goal?.endsAt && state ? Math.max(0, Math.ceil((goal.endsAt - (clock || state.now)) / 1000)) : null;
   const stageSeatId = mySeat?.on_stage ? mySeat.id : null;
   stageSeatRef.current = stageSeatId;
   const isPublisher = grant.host || battlePublisher || !!stageSeatId;
@@ -519,7 +524,7 @@ export default function Broadcast({ grant, user, signIn, leave }: {
     {streaming ? <div className="arena-media audience-media" aria-label="LIVE video stage">
       {state?.playback && !state.room.ended && (!grant.guest || state.room.guest_access) && !snapshot?.error
         ? <LiveStreamPlayer source={state.playback} />
-        : <p role="status">{snapshot?.error ?? (state?.room.ended ? 'Broadcast ended.' :
+        : <p role="status">{snapshot?.error ?? (state?.room.ended ? endedMessage :
           grant.guest && state?.room.guest_access === false ? 'Guest watching is off.' : 'Getting the LIVE video ready…')}</p>}
     </div> : <div className={'arena-media' + layout + (fit&&fitAllowed ? ' fit' : '')} aria-label="LIVE video stage" data-tile-count={spotlight && !fullscreen ? cards : tiles.length} data-layout-cards={grid?cards:undefined}
       style={{ '--rail-rows': Math.max(1, Math.ceil((cards - 1) / 2)), '--grid-rows':cards/2 } as CSSProperties}>
@@ -603,6 +608,11 @@ export default function Broadcast({ grant, user, signIn, leave }: {
       {match?.status==='cancelled'&&!seats.length&&<p className="hint">Challenge {match.outcome==='guest_removed'?'ended':match.outcome}.</p>}
     </div>
     <div className="arena-foot" ref={footer}>
+      {active && goal && goalSeconds !== null && <p className="arena-notice live-like-goal"
+        data-warning={goalSeconds <= 60 && goal.count < goal.target}>
+        {goal.count >= goal.target ? 'Likes goal reached'
+          : `${goal.count}/${goal.target} likes · ${Math.floor(goalSeconds / 60)}:${String(goalSeconds % 60).padStart(2, '0')}${goalSeconds <= 60 ? ' · LIVE ends if the goal is missed' : ''}`}
+      </p>}
       {grant.host && active && secondsLeft !== null && secondsLeft <= 300 && <p className="arena-notice">
         LIVE ends in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}.
       </p>}
@@ -624,6 +634,8 @@ export default function Broadcast({ grant, user, signIn, leave }: {
         </div>}
       </div>}
       <div className="arena-buttons arena-tools">
+        {active && (!grant.guest || /^\d{6}$/.test(grant.shareCode ?? '')) &&
+          <LiveHearts path={path} viewer={!grant.host} code={grant.guest ? grant.shareCode : undefined} goal={goal} />}
         {requestedSeat && openSeats === 0 && <button className="arena-action arena-pill" disabled={pending}
           onClick={() => void stageAction({action:'cancel-request'})}>Cancel stage request</button>}
         <button className="arena-action" aria-label={hideChat ? 'Show chat' : 'Hide chat'} title={hideChat ? 'Show chat' : 'Hide chat'} aria-pressed={!hideChat}
